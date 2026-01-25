@@ -4,32 +4,35 @@ A data-driven champion recommendation system that helps League of Legends player
 
 ## The Problem
 
-Champion select in League of Legends is complex and high-pressure:
+Need suggestions for what to pick in a ranked game? You're not alone.
 
-- **Information overload**: 160+ champions, constantly changing balance patches, complex team interactions
-- **Time pressure**: 30 seconds to pick while considering allies, enemies, and bans
-- **Hidden knowledge**: Pro-level synergies and counters aren't obvious to most players
-- **Recency bias**: Players often remember recent games more than statistical trends
+Champion select can be overwhelming - there are 160+ champions to choose from, the meta shifts every patch, and you've got 30 seconds to make a decision while considering your team, the enemy team, and what's been banned.
 
-Most players rely on gut feeling, outdated guides, or simple "counter pick" websites that don't consider the full draft context.
+Most players end up picking based on:
+- **What they played last game** (even if it was terrible)
+- **Generic "counter pick" websites** that ignore your team composition
+- **Gut feeling** about what "feels strong" this patch
+- **That one guide from 3 patches ago** they bookmarked
+
+The result? Suboptimal picks that could have been avoided with better information.
 
 ## The Solution
 
 This tool provides **intelligent, context-aware champion recommendations** by combining three key factors:
 
-### 🎯 **Meta Score (40%)** - Patch Strength
+### **Meta Score (40%)** - Patch Strength
 How strong is this champion in the current patch?
 - Uses real match data from Riot Games API
 - Filters by rank and role for relevance
 - Updates automatically with each patch
 
-### 🤝 **Synergy Score (30%)** - Team Chemistry  
+### **Synergy Score (30%)** - Team Chemistry  
 How well does this champion work with your team?
 - **Duo-Delta Method**: Compares actual vs expected win rates when champions are played together
 - Example: If Yasuo normally wins 50% and Malphite wins 50%, we'd expect them together to win ~50%. If they actually win 65% together, that's a +15% synergy bonus.
 - Accounts for all ally champions, not just one
 
-### ⚔️ **Counter Score (30%)** - Matchup Advantage
+### **Counter Score (30%)** - Matchup Advantage
 How well does this champion perform against enemies?
 - Head-to-head win rates from historical match data
 - Considers all enemy champions, weighted by importance
@@ -55,7 +58,7 @@ Traditional synergy analysis has problems:
 
 This initial version focuses on **core functionality with mid lane**:
 
-### ✅ **What's Included**
+### **Included Features**
 - **Mid lane recommendations only** (most complex role for testing)
 - **Real-time patch data** from Riot Games API with caching
 - **Mathematical scoring system** with configurable weights
@@ -63,14 +66,14 @@ This initial version focuses on **core functionality with mid lane**:
 - **Statistical correctness** with comprehensive test coverage
 - **Command-line interface** for immediate usability
 
-### 🔄 **What's Coming Next**
+### **Future Features**
 - **All roles support** (top, jungle, ADC, support)
 - **Web interface** with visual champion portraits and explanations
 - **Advanced team composition analysis** (damage types, team fight roles)
 - **Real-time integration** with champion select (if possible within Riot's ToS)
 - **Machine learning enhancements** for meta prediction
 
-### 🚫 **What's Explicitly Out of Scope**
+### **Not Included Features**
 - **Game client integration** (violates Riot's Terms of Service)
 - **Automated picking** (this is a recommendation tool, not a bot)
 - **Rank climbing guarantees** (it's still a game of skill!)
