@@ -57,8 +57,8 @@ htmlcov/
 ehthumbs.db
 Thumbs.db
 
-# Project specific
-data/
+# Project specific - runtime data only
+/data/
 *.log
 temp/
 tmp/
