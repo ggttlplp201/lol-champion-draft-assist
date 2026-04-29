@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draft Advisor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="app-title">Draft Advisor</h1>
+                <span class="patch-info">Patch 14.3</span>
+            </div>
+            <div class="header-center">
+                <select class="role-selector">
+                    <option value="mid">Mid Lane</option>
+                </select>
+            </div>
+            <div class="header-right">
+                <button class="tab-button active" data-tab="overall">Best Overall</button>
+                <button class="tab-button" data-tab="pool">From My Pool</button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel -->
+            <div class="left-panel">
+                <div class="section">
+                    <h3 class="section-title">Ally Picks</h3>
+                    <div class="champion-slots" id="ally-slots">
+                        <div class="champion-slot empty" data-type="ally" data-index="0"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ally" data-index="1"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ally" data-index="2"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ally" data-index="3"><span class="plus-icon">+</span></div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3 class="section-title">Enemy Picks</h3>
+                    <div class="champion-slots" id="enemy-slots">
+                        <div class="champion-slot empty" data-type="enemy" data-index="0"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="enemy" data-index="1"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="enemy" data-index="2"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="enemy" data-index="3"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="enemy" data-index="4"><span class="plus-icon">+</span></div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3 class="section-title">Bans</h3>
+                    <div class="champion-slots" id="ban-slots">
+                        <div class="champion-slot empty" data-type="ban" data-index="0"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ban" data-index="1"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ban" data-index="2"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ban" data-index="3"><span class="plus-icon">+</span></div>
+                        <div class="champion-slot empty" data-type="ban" data-index="4"><span class="plus-icon">+</span></div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3 class="section-title">My Champion Pool</h3>
+                    <input type="text" class="champion-pool-input" placeholder="Type name + Enter to add...">
+                    <div class="champion-pool-list" id="champion-pool"></div>
+                </div>
+            </div>
+
+            <!-- Center Panel -->
+            <div class="center-panel">
+                <div class="panel-title">
+                    Recommended Picks
+                    <span class="tab-indicator" id="tab-indicator">Overall</span>
+                </div>
+                <div id="recommendations"></div>
+            </div>
+
+            <!-- Right Panel -->
+            <div class="right-panel">
+                <div class="detail-header">
+                    <div class="detail-avatar" id="detail-champion-avatar">?</div>
+                    <div class="detail-info">
+                        <h3 id="detail-champion-name">Select a pick</h3>
+                        <div class="detail-subtitle">Score Breakdown</div>
+                    </div>
+                    <div class="detail-total-score" id="detail-total-score">--</div>
+                </div>
+
+                <div class="score-bars" id="score-bars">
+                    <div class="score-bar">
+                        <div class="score-label">
+                            <span>Meta</span>
+                            <span class="score-value" id="meta-score">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill meta" id="meta-progress" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="score-bar">
+                        <div class="score-label">
+                            <span>Synergy</span>
+                            <span class="score-value" id="synergy-score">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill synergy" id="synergy-progress" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="score-bar">
+                        <div class="score-label">
+                            <span>Counter</span>
+                            <span class="score-value" id="counter-score">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill counter" id="counter-progress" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="score-bar" id="mastery-bar" style="display:none">
+                        <div class="score-label">
+                            <span>Pool Confidence</span>
+                            <span class="score-value" id="mastery-score">--</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill mastery" id="mastery-progress" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="explanation-section">
+                    <div class="explanation-group">
+                        <h4 class="explanation-title">Why This Pick Works</h4>
+                        <ul class="explanation-list" id="positive-explanations">
+                            <li>Select a recommendation to see analysis</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Champion Selection Modal -->
+    <div class="modal" id="champion-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Select Champion</h3>
+                <button class="close-button" id="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="text" class="champion-search" placeholder="Search..." id="champion-search">
+                <div class="champion-grid" id="champion-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Pass tab indicator update to JS
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const indicator = document.getElementById('tab-indicator');
+                indicator.textContent = btn.dataset.tab === 'pool' ? 'My Pool' : 'Overall';
+            });
+        });
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

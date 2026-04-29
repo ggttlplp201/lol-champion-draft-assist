@@ -59,6 +59,8 @@ Thumbs.db
 
 # Project specific - runtime data only
 /data/
+cache/
+.hypothesis/
 *.log
 temp/
 tmp/

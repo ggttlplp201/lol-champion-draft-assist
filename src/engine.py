@@ -41,6 +41,48 @@ class StandardSuggestionEngine(SuggestionEngine):
             score_weights=ScoreWeights(),
             confidence_bonus=15.0
         )
+        
+        # Champion ID to name mapping (MVP: basic mapping, will be enhanced with Data Dragon)
+        self.champion_names = {
+            "yasuo": "Yasuo",
+            "zed": "Zed", 
+            "ahri": "Ahri",
+            "katarina": "Katarina",
+            "azir": "Azir",
+            "cassiopeia": "Cassiopeia",
+            "diana": "Diana",
+            "fizz": "Fizz",
+            "leblanc": "LeBlanc",
+            "lissandra": "Lissandra",
+            "malzahar": "Malzahar",
+            "orianna": "Orianna",
+            "syndra": "Syndra",
+            "talon": "Talon",
+            "twisted_fate": "Twisted Fate",
+            "veigar": "Veigar",
+            "viktor": "Viktor",
+            "xerath": "Xerath",
+            "ziggs": "Ziggs",
+            "jinx": "Jinx",
+            "darius": "Darius",
+            "akali": "Akali",
+            "anivia": "Anivia",
+            "annie": "Annie",
+            "brand": "Brand",
+            "corki": "Corki",
+            "ekko": "Ekko",
+            "galio": "Galio",
+            "irelia": "Irelia",
+            "kassadin": "Kassadin",
+            "lux": "Lux",
+            "neeko": "Neeko",
+            "qiyana": "Qiyana",
+            "ryze": "Ryze",
+            "sylas": "Sylas",
+            "vel_koz": "Vel'Koz",
+            "vladimir": "Vladimir",
+            "yone": "Yone"
+        }
     
     async def generate_recommendations(
         self,
@@ -49,6 +91,11 @@ class StandardSuggestionEngine(SuggestionEngine):
     ) -> RecommendationResult:
         """
         Generate champion recommendations based on current draft state.
+        
+        Requirements: 2.2, 3.3, 7.3, 7.4
+        - Generate champion pool and overall recommendations
+        - Exclude banned champions from all suggestions
+        - Display "Top 5 Champion Pool Picks" and "Top 5 Overall Picks"
         
         Returns both champion pool recommendations (filtered to user's pool with bonus)
         and overall recommendations (all champions).
@@ -64,13 +111,13 @@ class StandardSuggestionEngine(SuggestionEngine):
         synergy_data: List[SynergyData] = []
         counter_data: List[CounterData] = []
         
-        # Get all available champions for the role (placeholder)
+        # Get all available champions for the role (excluding banned champions)
         available_champions = self._get_available_champions(
             draft_state, 
             champion_stats
         )
         
-        # Calculate scores for all champions
+        # Calculate scores for all available champions
         all_recommendations = []
         for champion in available_champions:
             stats = self._find_champion_stats(champion.id, champion_stats)
@@ -83,30 +130,36 @@ class StandardSuggestionEngine(SuggestionEngine):
                 draft_state,
                 synergy_data,
                 counter_data,
-                is_in_pool=False
+                is_in_pool=False  # Overall recommendations don't get pool bonus
             )
             all_recommendations.append(recommendation)
         
-        # Sort by score (descending)
+        # Sort by score (descending) for overall recommendations
         all_recommendations.sort(key=lambda x: x.score, reverse=True)
         
-        # Filter for champion pool recommendations
-        pool_recommendations = [
-            self._create_recommendation(
-                rec.champion,
-                self._find_champion_stats(rec.champion.id, champion_stats),
-                draft_state,
-                synergy_data,
-                counter_data,
-                is_in_pool=True
-            )
-            for rec in all_recommendations
-            if rec.champion.id in user_champion_pool
-        ]
+        # Generate champion pool recommendations (filtered to user's pool with bonus)
+        pool_recommendations = []
+        for champion in available_champions:
+            # Only include champions in user's champion pool
+            if champion.id in user_champion_pool:
+                stats = self._find_champion_stats(champion.id, champion_stats)
+                if not stats:
+                    continue
+                    
+                recommendation = self._create_recommendation(
+                    champion,
+                    stats,
+                    draft_state,
+                    synergy_data,
+                    counter_data,
+                    is_in_pool=True  # Apply confidence bonus
+                )
+                pool_recommendations.append(recommendation)
         
         # Sort pool recommendations by score (descending)
         pool_recommendations.sort(key=lambda x: x.score, reverse=True)
         
+        # Return top 5 from each category as per requirements 7.3, 7.4
         return RecommendationResult(
             champion_pool_recommendations=pool_recommendations[:5],
             overall_recommendations=all_recommendations[:5],
@@ -118,21 +171,33 @@ class StandardSuggestionEngine(SuggestionEngine):
         draft_state: DraftState, 
         champion_stats: List[ChampionStats]
     ) -> List[Champion]:
-        """Get list of available champions excluding banned ones."""
-        # Placeholder implementation - will be expanded in future tasks
+        """
+        Get list of available champions excluding banned ones.
+        
+        Requirements: 3.3 - Exclude banned champions from all suggestions
+        
+        Note: Assumes Champion.id matches ChampionStats.champion_id format exactly.
+        For production, ensure consistent ID format (Riot champion key) across all data sources.
+        """
         banned_ids = {champ.id for champ in draft_state.banned_champions}
+        seen = set()  # Deduplicate champions by ID
         
         available = []
         for stats in champion_stats:
-            if stats.champion_id not in banned_ids:
-                # Create basic champion object from stats
-                champion = Champion(
-                    id=stats.champion_id,
-                    name=stats.champion_id.title(),  # Placeholder name
-                    role=stats.role,
-                    tags=[]  # Will be populated from API data
-                )
-                available.append(champion)
+            # Skip banned champions and duplicates
+            if stats.champion_id in banned_ids or stats.champion_id in seen:
+                continue
+            
+            seen.add(stats.champion_id)
+            
+            # Create basic champion object from stats
+            champion = Champion(
+                id=stats.champion_id,
+                name=self._get_champion_name(stats.champion_id),  # Use proper name lookup
+                role=stats.role,
+                tags=[]  # Will be populated from API data
+            )
+            available.append(champion)
         
         return available
     
@@ -210,34 +275,77 @@ class StandardSuggestionEngine(SuggestionEngine):
         score_breakdown: ScoreBreakdown,
         draft_state: DraftState
     ) -> List[str]:
-        """Generate explanations based on score components."""
+        """
+        Generate deterministic explanations based on score components.
+        
+        Requirements: 9.1, 9.2, 9.3, 9.4
+        - Generate 2-4 explanation bullets using deterministic rules
+        - Include meta, synergy, and counter explanations based on highest scores
+        - Use specific explanation templates for each score component
+        """
         explanations = []
         
-        # Determine highest contributing factors
-        scores = [
-            (score_breakdown.meta_score, "meta"),
-            (score_breakdown.synergy_score, "synergy"), 
-            (score_breakdown.counter_score, "counter")
+        # Determine score components and their weighted contributions for ranking
+        weights = self.default_preferences.score_weights
+        weighted_contributions = [
+            (score_breakdown.meta_score * weights.meta, score_breakdown.meta_score, "meta"),
+            (score_breakdown.synergy_score * weights.synergy, score_breakdown.synergy_score, "synergy"), 
+            (score_breakdown.counter_score * weights.counter, score_breakdown.counter_score, "counter")
         ]
-        scores.sort(key=lambda x: x[0], reverse=True)
         
-        # Add explanations for top contributing factors
-        for score, factor in scores[:2]:  # Top 2 factors
-            if factor == "meta" and score > 60:
+        # Sort by weighted contribution (descending) to prioritize highest contributing factors
+        weighted_contributions.sort(key=lambda x: x[0], reverse=True)
+        
+        # Generate explanations for top contributing factors (deterministic rules)
+        explanation_count = 0
+        max_explanations = 4  # Requirement 9.1: 2-4 explanation bullets
+        
+        for weighted_contrib, raw_score, component_type in weighted_contributions:
+            if explanation_count >= max_explanations:
+                break
+                
+            # Meta score explanations (Requirement 9.2)
+            if component_type == "meta" and raw_score > 60:
                 explanations.append("Strong pick in the current patch")
-            elif factor == "synergy" and score > 60 and draft_state.ally_champions:
+                explanation_count += 1
+            
+            # Synergy score explanations (Requirement 9.3)
+            elif component_type == "synergy" and raw_score > 60 and draft_state.ally_champions:
+                # Use first ally champion for explanation (deterministic)
                 ally_name = draft_state.ally_champions[0].name
                 explanations.append(f"Synergizes well with {ally_name}")
-            elif factor == "counter" and score > 60 and draft_state.enemy_champions:
+                explanation_count += 1
+            
+            # Counter score explanations (Requirement 9.4)
+            elif component_type == "counter" and raw_score > 60 and draft_state.enemy_champions:
+                # Use first enemy champion for explanation (deterministic)
                 enemy_name = draft_state.enemy_champions[0].name
                 explanations.append(f"Performs well against {enemy_name}")
+                explanation_count += 1
         
-        # Add confidence bonus explanation
-        if score_breakdown.confidence_bonus:
+        # Add confidence bonus explanation if applicable
+        if score_breakdown.confidence_bonus and explanation_count < max_explanations:
             explanations.append("Champion in your pool (confidence bonus applied)")
+            explanation_count += 1
         
-        # Ensure we have at least one explanation
-        if not explanations:
+        # Add team composition explanation if we have room and allies exist
+        if (explanation_count < max_explanations and 
+            draft_state.ally_champions and 
+            len(explanations) < 2):  # Ensure we have at least 2 explanations
+            explanations.append("Balances team damage profile")
+            explanation_count += 1
+        
+        # Ensure we have at least 2 explanations as per requirement 9.1
+        if len(explanations) < 2:
             explanations.append("Balanced pick for current draft state")
         
-        return explanations[:4]  # Limit to 4 explanations as per requirements
+        # Return exactly 2-4 explanations as per requirements
+        return explanations[:max_explanations]
+    
+    def _get_champion_name(self, champion_id: str) -> str:
+        """
+        Get proper champion name from champion ID.
+        
+        MVP: Uses basic mapping, will be enhanced with Data Dragon API.
+        """
+        return self.champion_names.get(champion_id, champion_id.title())

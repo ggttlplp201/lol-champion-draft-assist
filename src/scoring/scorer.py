@@ -59,11 +59,19 @@ class StandardScorer(ChampionScorer):
     
     def calculate_meta_score(self, champion: Champion, stats: ChampionStats) -> float:
         """
-        Calculate meta score based on win rate.
-        Normalizes win rate to 0-100 scale.
+        Calculate meta score based on patch-specific win rates for mid lane champions.
+        Normalizes win rate to 0-100 scale using typical mid lane win rate ranges.
+        
+        Requirements: 6.1, 8.2
+        - Uses role-specific patch win rates from Riot Games API
+        - Normalizes meta scores to 0-100 scale
         """
-        # Normalize win rate from typical range (0.3-0.7) to 0-100 scale
-        return self._normalize_to_scale(stats.win_rate, 0.3, 0.7, 0, 100)
+        if not stats or stats.role != Role.MIDDLE:
+            return 50.0  # Neutral score for invalid/missing data
+        
+        # Normalize win rate from typical mid lane range (0.35-0.65) to 0-100 scale
+        # Mid lane champions typically have win rates between 35% and 65%
+        return self._normalize_to_scale(stats.win_rate, 0.35, 0.65, 0, 100)
     
     def calculate_synergy_score(
         self, 
@@ -124,16 +132,40 @@ class StandardScorer(ChampionScorer):
         confidence_bonus: float = 0.0
     ) -> float:
         """
-        Calculate final weighted score: (Meta × 0.4) + (Synergy × 0.3) + (Counter × 0.3)
-        Plus optional confidence bonus for champion pool champions.
+        Calculate final weighted score combining meta (40%), synergy (30%), counter (30%) scores.
+        Apply configurable confidence bonus for champion pool champions.
+        
+        Requirements: 8.1
+        - Uses weighted sum: Score = (Meta × 0.4) + (Synergy × 0.3) + (Counter × 0.3)
+        - Applies configurable confidence bonus for champions in user pool
+        
+        Args:
+            meta_score: Meta score (0-100)
+            synergy_score: Synergy score (0-100)
+            counter_score: Counter score (0-100)
+            weights: Score weights (default: meta=0.4, synergy=0.3, counter=0.3)
+            confidence_bonus: Bonus points for champion pool champions (default: 15)
+            
+        Returns:
+            Final weighted score with optional confidence bonus
         """
+        # Validate that weights sum to 1.0 (with small tolerance for floating point)
+        total_weight = weights.meta + weights.synergy + weights.counter
+        if abs(total_weight - 1.0) > 0.001:
+            raise ValueError(f"Score weights must sum to 1.0, got {total_weight}")
+        
+        # Calculate weighted score: (Meta × 0.4) + (Synergy × 0.3) + (Counter × 0.3)
         weighted_score = (
             meta_score * weights.meta +
             synergy_score * weights.synergy +
             counter_score * weights.counter
         )
         
-        return weighted_score + confidence_bonus
+        # Apply confidence bonus for champion pool champions
+        final_score = weighted_score + confidence_bonus
+        
+        # Ensure score doesn't exceed reasonable bounds (though no hard cap specified)
+        return max(0.0, final_score)
     
     def _normalize_to_scale(
         self, 
