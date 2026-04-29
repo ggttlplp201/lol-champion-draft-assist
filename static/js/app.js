@@ -6,14 +6,24 @@ class DraftAdvisor {
         this.draft = { allies: [], enemies: [], banned: [], pool: [] };
         this.currentSlot = null;
         this.lastData = null;
+        this.ddVersion = '14.24.1';
 
         this.init();
     }
 
     async init() {
+        await this.loadDDragonVersion();
         await this.loadChampions();
         this.bindEvents();
         this.fetchRecs();
+    }
+
+    async loadDDragonVersion() {
+        try {
+            const r = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+            const versions = await r.json();
+            if (versions && versions[0]) this.ddVersion = versions[0];
+        } catch(e) { /* keep fallback */ }
     }
 
     async loadChampions() {
@@ -21,6 +31,27 @@ class DraftAdvisor {
             const r = await fetch('/api/champions');
             this.champions = await r.json();
         } catch (e) { console.error(e); }
+    }
+
+    // ── DDragon icons ─────────────────────────────────────────
+
+    getDDragonId(champId) {
+        const exceptions = {
+            'cho_gath':    'Chogath',
+            'jarvan_iv':   'JarvanIV',
+            'kai_sa':      'Kaisa',
+            'kha_zix':     'Khazix',
+            'vel_koz':     'Velkoz',
+            'renata_glasc':'Renata',
+            'wukong':      'MonkeyKing',
+        };
+        return exceptions[champId] ||
+            champId.split('_').map(p => p[0].toUpperCase() + p.slice(1)).join('');
+    }
+
+    iconHtml(champId, name) {
+        const url = `https://ddragon.leagueoflegends.com/cdn/${this.ddVersion}/img/champion/${this.getDDragonId(champId)}.png`;
+        return `<img src="${url}" alt="${name}" class="champ-icon" loading="lazy" onerror="this.style.display='none'">`;
     }
 
     bindEvents() {
@@ -125,7 +156,7 @@ class DraftAdvisor {
             row.innerHTML = `
                 <span class="rec-rank">${i + 1}</span>
                 <div class="rec-champ-cell">
-                    <div class="rec-icon">${rec.championName[0]}</div>
+                    <div class="rec-icon">${this.iconHtml(rec.championId, rec.championName)}</div>
                     <span class="rec-name">${rec.championName}</span>
                 </div>
                 <div style="text-align:center">
@@ -139,7 +170,6 @@ class DraftAdvisor {
             el.appendChild(row);
         });
 
-        // Auto-select first
         const first = el.querySelector('.rec-row');
         if (first) this.selectRow(first);
     }
@@ -152,7 +182,7 @@ class DraftAdvisor {
 
     updateDetail(rec) {
         const tier = this.getTier(rec.score);
-        document.getElementById('detail-avatar').textContent = rec.championName[0];
+        document.getElementById('detail-avatar').innerHTML = this.iconHtml(rec.championId, rec.championName);
         document.getElementById('detail-name').textContent = rec.championName;
 
         const tb = document.getElementById('detail-tier');
@@ -220,7 +250,7 @@ class DraftAdvisor {
             div.className = 'champ-opt' + (used.has(id) ? ' used' : '');
             div.dataset.id = id;
             div.innerHTML = `
-                <div class="champ-opt-icon">${c.name[0]}</div>
+                <div class="champ-opt-icon">${this.iconHtml(id, c.name)}</div>
                 <div class="champ-opt-name">${c.name}</div>
             `;
             if (!used.has(id)) {
@@ -262,11 +292,10 @@ class DraftAdvisor {
 
     fillSlot(slot, id, type) {
         const name = this.champions[id]?.name || id;
-        const initial = name[0];
         slot.classList.remove('empty');
         slot.classList.add('filled');
         slot.innerHTML = `
-            <div class="slot-icon-box ${type}">${initial}</div>
+            <div class="slot-icon-box ${type}">${this.iconHtml(id, name)}</div>
             <div class="slot-name">${name}</div>
             <button class="slot-remove" onclick="app.removeSlot(this)">&times;</button>
         `;

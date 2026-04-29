@@ -184,6 +184,8 @@ body {
     font-weight: 700;
     font-size: 14px;
     color: #fff;
+    overflow: hidden;
+    position: relative;
 }
 
 .slot-icon-box.ally    { background: #1d4ed8; }
@@ -313,6 +315,8 @@ body {
     font-size: 15px;
     color: #fff;
     flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
 }
 
 .rec-name {
@@ -405,6 +409,8 @@ body {
     color: #fff;
     flex-shrink: 0;
     border: 2px solid var(--border);
+    overflow: hidden;
+    position: relative;
 }
 
 .detail-name {
@@ -659,6 +665,8 @@ body {
     font-weight: 700;
     font-size: 17px;
     color: #fff;
+    overflow: hidden;
+    position: relative;
 }
 
 .champ-opt-name {
@@ -669,6 +677,16 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* ─── CHAMPION ICONS ─────────────────────────────────────── */
+.champ-icon {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
 }
 
 /* ─── RESPONSIVE ─────────────────────────────────────────── */
