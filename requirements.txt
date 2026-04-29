@@ -7,3 +7,4 @@ hypothesis==6.141.1
 flask==3.0.0
 riotwatcher==3.2.5
 python-dotenv==1.0.1
+lolalytics-api>=0.1.0

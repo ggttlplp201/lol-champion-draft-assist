@@ -373,44 +373,42 @@ class MockDataManager(DataManager):
         return None
 
 
-class HybridDataManager(DataManager):
-    """Tries the live Riot API; falls back to MockDataManager on failures or empty results.
+class LolatyticsWithFallback(DataManager):
+    """Uses LolatyticsClient for real data; falls back to MockDataManager on failure."""
 
-    The existing RiotWatcherClient uses a deprecated summoner.by_name endpoint and
-    a tiny generic mock (10 champs, all 50 % WR) when the API call fails, which makes
-    recommendations meaningless.  This wrapper detects that case and substitutes our
-    full role-aware mock data instead.
-    """
-
-    def __init__(self, live: DataManager, fallback: MockDataManager):
-        self._live = live
-        self._fb = fallback
+    def __init__(self, primary: DataManager, fallback: MockDataManager):
+        self._p = primary
+        self._f = fallback
 
     async def fetch_champion_stats(self, patch: str, role: Role) -> List[ChampionStats]:
         try:
-            stats = await self._live.fetch_champion_stats(patch, role)
-            # Real data: many champs, realistic win rates (no 0% or 100%)
-            if (len(stats) >= 15
-                    and all(0.35 <= s.win_rate <= 0.65 for s in stats)):
+            stats = await self._p.fetch_champion_stats(patch, role)
+            if len(stats) >= 5:
                 return stats
         except Exception:
             pass
-        return await self._fb.fetch_champion_stats(patch, role)
+        return await self._f.fetch_champion_stats(patch, role)
 
-    async def fetch_match_data(self, filters):
-        return await self._fb.fetch_match_data(filters)
+    async def fetch_counter_data(self, patch: str, role: Role) -> List[CounterData]:
+        try:
+            data = await self._p.fetch_counter_data(patch, role)
+            if data:
+                return data
+        except Exception:
+            pass
+        return await self._f.fetch_counter_data(patch, role)
 
     async def fetch_synergy_data(self, patch, role_a, role_b):
-        return await self._fb.fetch_synergy_data(patch, role_a, role_b)
+        return await self._f.fetch_synergy_data(patch, role_a, role_b)
 
-    async def fetch_counter_data(self, patch, role):
-        return await self._fb.fetch_counter_data(patch, role)
+    async def fetch_match_data(self, filters):
+        return []
 
     def get_cached_data(self, key):
-        return self._fb.get_cached_data(key)
+        return self._f.get_cached_data(key)
 
     def set_cached_data(self, key, data, ttl):
-        self._fb.set_cached_data(key, data, ttl)
+        self._f.set_cached_data(key, data, ttl)
 
     async def save_user_data(self, user_data):
         pass
@@ -426,15 +424,12 @@ app.secret_key = 'draft_advisor_secret_key'
 
 _mock = MockDataManager()
 try:
-    from ..data.riotwatcher_client import RiotWatcherClient
-    if os.getenv('RIOT_API_KEY'):
-        print('Riot API key found — using HybridDataManager (live + mock fallback)')
-        data_manager = HybridDataManager(RiotWatcherClient(), _mock)
-    else:
-        print('No RIOT_API_KEY — using mock data')
-        data_manager = _mock
+    from ..data.lolalytics_client import LolatyticsClient
+    _lolalytics = LolatyticsClient(CHAMPION_DATA, CHAMPIONS_BY_ROLE)
+    data_manager = LolatyticsWithFallback(_lolalytics, _mock)
+    print('Using Lolalytics real data (win/pick/ban rates + counter matchups)')
 except Exception as e:
-    print(f'RiotWatcher init failed ({e}) — using mock data')
+    print(f'Lolalytics unavailable ({e}) — using mock data')
     data_manager = _mock
 
 scorer = StandardScorer()
