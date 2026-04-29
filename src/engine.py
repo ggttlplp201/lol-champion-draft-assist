@@ -81,10 +81,12 @@ class StandardSuggestionEngine(SuggestionEngine):
             draft_state.role
         )
         
-        # For MVP, we'll use placeholder data structures
-        # These will be implemented in future tasks
-        synergy_data: List[SynergyData] = []
-        counter_data: List[CounterData] = []
+        synergy_data = await self.data_manager.fetch_synergy_data(
+            draft_state.patch, draft_state.role, draft_state.role
+        )
+        counter_data = await self.data_manager.fetch_counter_data(
+            draft_state.patch, draft_state.role
+        )
         
         # Get all available champions for the role (excluding banned champions)
         available_champions = self._get_available_champions(

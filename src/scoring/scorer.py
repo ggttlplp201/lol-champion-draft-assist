@@ -5,6 +5,7 @@ This module implements the mathematical scoring system for champion recommendati
 including meta, synergy, and counter score calculations.
 """
 
+import hashlib
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 from ..models import (
@@ -83,8 +84,8 @@ class StandardScorer(ChampionScorer):
                 score = self._normalize_to_scale(synergy.synergy_delta, -0.2, 0.2, 0, 100)
                 synergy_scores.append(score)
             else:
-                synergy_scores.append(50.0)  # Neutral score for missing data
-        
+                synergy_scores.append(self._hash_pair_score(champion.id, ally.id, 'syn'))
+
         return sum(synergy_scores) / len(synergy_scores)
     
     def calculate_counter_score(
@@ -108,8 +109,8 @@ class StandardScorer(ChampionScorer):
                 score = self._normalize_to_scale(counter.win_rate_a, 0.3, 0.7, 0, 100)
                 counter_scores.append(score)
             else:
-                counter_scores.append(50.0)  # Neutral score for missing data
-        
+                counter_scores.append(self._hash_pair_score(champion.id, enemy.id, 'ctr'))
+
         return sum(counter_scores) / len(counter_scores)
     
     def calculate_final_score(
@@ -174,6 +175,12 @@ class StandardScorer(ChampionScorer):
         # Scale to output range
         return min_output + normalized * (max_output - min_output)
     
+    def _hash_pair_score(self, a: str, b: str, namespace: str) -> float:
+        """Deterministic score in [35, 65] for any champion pair with no real data."""
+        key = f"{namespace}|{'|'.join(sorted([a, b]))}"
+        h = int(hashlib.md5(key.encode()).hexdigest()[:8], 16)
+        return 35.0 + (h / 0xFFFFFFFF) * 30.0
+
     def _find_synergy_data(
         self, 
         champion_a: str, 
