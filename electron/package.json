@@ -1,0 +1,40 @@
+{
+  "name": "draft-advisor",
+  "version": "1.0.0",
+  "description": "League of Legends Draft Advisor overlay",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.lol.draftadvisor",
+    "productName": "Draft Advisor",
+    "directories": { "output": "../dist" },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "category": "public.app-category.games"
+    },
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "app",
+        "filter": [
+          "**/*",
+          "!electron/**",
+          "!dist/**",
+          "!venv/**",
+          "!.git/**",
+          "!tests/**",
+          "!*.md",
+          "!pytest.ini"
+        ]
+      }
+    ],
+    "afterPack": "../electron/after-pack.js"
+  }
+}

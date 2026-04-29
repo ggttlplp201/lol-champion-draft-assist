@@ -1,106 +1,106 @@
-# League of Legends Champion Draft Assist Tool
+# Draft Advisor
 
-A data-driven champion recommendation system that helps League of Legends players make better picks during champion select by analyzing patch strength, team synergy, and enemy matchups.
+A real-time champion select overlay for League of Legends. Connects to your local League client, reads the live ban/pick state automatically, and surfaces data-driven recommendations — counters, synergies, builds, runes, and win-rate curves — without leaving champion select.
 
-## The Problem
+## Features
 
-Need suggestions for what to pick in a ranked game? You're not alone.
+- **Live LCU integration** — hooks into the League client and auto-fills picks, bans, and your assigned role the moment champion select starts. No manual input required.
+- **Champion recommendations** scored on three factors:
+  - **Meta strength (40%)** — current patch win rate and tier from Lolalytics (Emerald+, global)
+  - **Counter score (30%)** — head-to-head win rate against each enemy pick
+  - **Synergy score (30%)** — how well the champion pairs with your ally picks
+- **Counter picks panel** — shows the strongest counters to the selected champion
+- **Build & runes** — most-played item core and rune page with win rates, pulled from Lolalytics
+- **Win rate by game length** — chart showing whether the champion wins early, scales to late, or peaks mid game, using real match data (not heuristics)
+- **Patch delta indicators** — flags champions with significant win-rate changes this patch
+- **Electron overlay** — runs as a floating window above the League client; stays on top in windowed / borderless windowed mode
 
-Champion select can be overwhelming - there are 160+ champions to choose from, the meta shifts every patch, and you've got 30 seconds to make a decision while considering your team, the enemy team, and what's been banned.
+## Running the app
 
-Most players end up picking based on:
-- **What they played last game** (even if it was terrible)
-- **Generic "counter pick" websites** that ignore your team composition
-- **Gut feeling** about what "feels strong" this patch
-- **That one guide from 3 patches ago** they bookmarked
+### Prerequisites
 
-The result? Suboptimal picks that could have been avoided with better information.
+- Python 3.9+ with a virtual environment (`venv/`)
+- Node.js 18+ (for the Electron overlay)
+- Dependencies installed: `pip install -r requirements.txt`
 
-## The Solution
-
-This tool provides **intelligent, context-aware champion recommendations** by combining three key factors:
-
-### **Meta Score (40%)** - Patch Strength
-How strong is this champion in the current patch?
-- Uses real match data from Riot Games API
-- Filters by rank and role for relevance
-- Updates automatically with each patch
-
-### **Synergy Score (30%)** - Team Chemistry  
-How well does this champion work with your team?
-- **Duo-Delta Method**: Compares actual vs expected win rates when champions are played together
-- Example: If Yasuo normally wins 50% and Malphite wins 50%, we'd expect them together to win ~50%. If they actually win 65% together, that's a +15% synergy bonus.
-- Accounts for all ally champions, not just one
-
-### **Counter Score (30%)** - Matchup Advantage
-How well does this champion perform against enemies?
-- Head-to-head win rates from historical match data
-- Considers all enemy champions, weighted by importance
-- Updates with patch changes and meta shifts
-
-## Why Duo-Delta for Synergy?
-
-Traditional synergy analysis has problems:
-- **Subjective**: "These champions have good teamfight synergy" (says who?)
-- **Incomplete**: Only considers obvious combos like Yasuo + Malphite
-- **Static**: Doesn't adapt to patch changes or meta shifts
-
-**Duo-Delta is objective and comprehensive:**
-
-1. **Statistical Foundation**: Uses actual match outcomes, not opinions
-2. **Discovers Hidden Synergies**: Finds unexpected champion combinations that win more than they should
-3. **Adapts Automatically**: Updates as the meta changes and new strategies emerge
-4. **Quantifiable**: Gives precise numbers you can trust
-
-**Example**: If Orianna (52% win rate) and Jinx (51% win rate) win 58% of games when played together, that's a +5% synergy delta - significantly better than random chance.
-
-## MVP Scope
-
-This initial version focuses on **core functionality with mid lane**:
-
-### **Included Features**
-- **Mid lane recommendations only** (most complex role for testing)
-- **Real-time patch data** from Riot Games API with caching
-- **Mathematical scoring system** with configurable weights
-- **Champion pool support** with confidence bonuses
-- **Statistical correctness** with comprehensive test coverage
-- **Command-line interface** for immediate usability
-
-### **Future Features**
-- **All roles support** (top, jungle, ADC, support)
-- **Web interface** with visual champion portraits and explanations
-- **Advanced team composition analysis** (damage types, team fight roles)
-- **Real-time integration** with champion select (if possible within Riot's ToS)
-- **Machine learning enhancements** for meta prediction
-
-### **Not Included Features**
-- **Game client integration** (violates Riot's Terms of Service)
-- **Automated picking** (this is a recommendation tool, not a bot)
-- **Rank climbing guarantees** (it's still a game of skill!)
-
-## Quick Start
+### Start the overlay
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set your Riot API key
-export RIOT_API_KEY="your_key_here"
-
-# Run tests to verify everything works
-python -m pytest tests/
-
-# Get champion recommendations (coming soon)
-python main.py --role mid --allies yasuo --enemies zed
+cd electron
+npm install      # first time only
+npm start
 ```
 
-## Technical Highlights
+This spawns the Flask backend automatically and opens a floating overlay window.
 
-- **Statistically rigorous**: Proper sample sizes, confidence intervals, and bias correction
-- **Performance optimized**: Intelligent caching and rate limiting for Riot API
-- **Test-driven**: Property-based testing ensures mathematical correctness
-- **Extensible architecture**: Clean separation between data, scoring, and interface layers
+### Browser-only (no Electron)
+
+Double-click **`Launch Draft Advisor.command`** in Finder, or run manually:
+
+```bash
+python web_server.py
+# then open http://127.0.0.1:5001
+```
+
+## How it works
+
+```
+League client (LCU API)
+        │  local HTTPS, port discovered via process args
+        ▼
+  Flask backend  ──────────────────────────────────────────┐
+  • polls /lol-champ-select/v1/session every 500 ms        │
+  • streams state changes to browser via SSE               │
+  • fetches champion stats + counters from Lolalytics      │
+  • fetches build + rune + game-length WR from Lolalytics  │
+        │                                                   │
+        ▼                                                   │
+  Browser UI  ◄──────────────────────────────────────────── SSE
+  • renders recommendations, counters, build, runes
+  • power spike chart (real win-rate-by-game-length data)
+        │
+        ▼
+  Electron wrapper
+  • always-on-top BrowserWindow (floats over the game)
+  • menu-bar tray icon to toggle always-on-top or quit
+```
+
+**Data source**: [Lolalytics](https://lolalytics.com) internal API — Emerald+ ranked, global, current patch. No Riot API key required.
+
+## Scoring model
+
+| Factor | Weight | Source |
+|---|---|---|
+| Win rate (patch-adjusted) | 40% | Lolalytics `ep=tier` |
+| Counter win rate vs enemy picks | 30% | Lolalytics `ep=counter` |
+| Synergy with ally picks | 30% | Hash-based estimate (Lolalytics doesn't expose synergy data directly) |
+
+Recommendations are filtered to champions whose primary role matches the selected lane, with a minimum of 500 games for statistical reliability.
+
+## Project structure
+
+```
+web_server.py          entry point — starts Flask
+src/
+  interface/
+    web_app.py         Flask routes, SSE relay, champion detail API
+  lcu/
+    connector.py       LCUConnector (REST) + LCUService (polling thread)
+  data/
+    lolalytics_client.py   fetches stats, counters, builds, runes
+    manager.py             DataManager base + SimpleCache
+  engine.py            recommendation engine
+  scoring/scorer.py    weighted scorer
+  models.py            dataclasses (Role, Champion, DraftState, …)
+static/
+  js/app.js            UI logic, SSE client, chart rendering
+  css/style.css        styles
+templates/index.html   single-page app shell
+electron/
+  main.js              spawns Flask, creates BrowserWindow
+  package.json         Electron + electron-builder config
+```
 
 ---
 
-*This tool is for educational and personal use only. It is not affiliated with Riot Games. League of Legends is a trademark of Riot Games, Inc.*
+*For personal use only. Not affiliated with Riot Games. League of Legends is a trademark of Riot Games, Inc.*

@@ -68,3 +68,7 @@ tmp/
 # API keys (security)
 config/api_keys.json
 secrets.json
+
+# Electron
+electron/node_modules/
+dist/

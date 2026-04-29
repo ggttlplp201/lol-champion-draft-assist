@@ -1,8 +1,10 @@
 """Web interface for the Champion Draft Assist Tool."""
 
 import asyncio
+import json
 import os
-from flask import Flask, render_template, request, jsonify
+import requests as _requests
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from typing import List
 
 from ..models import (
@@ -12,6 +14,96 @@ from ..models import (
 from ..engine import StandardSuggestionEngine
 from ..data.manager import DataManager, SimpleCache
 from ..scoring.scorer import StandardScorer
+
+
+_ITEM_NAMES: dict = {}   # {item_id_int: name_str}
+_RUNE_NAMES: dict = {}   # {rune_id_int: name_str}
+
+
+def _enrich_champion_data_with_keys(champion_data: dict) -> str:
+    """Fetch DDragon to add numeric 'key' + 'tags' to each entry; returns short patch."""
+    global _ITEM_NAMES, _RUNE_NAMES
+    try:
+        versions = _requests.get(
+            'https://ddragon.leagueoflegends.com/api/versions.json', timeout=5
+        ).json()
+        patch = versions[0]
+
+        champ_json = _requests.get(
+            f'https://ddragon.leagueoflegends.com/cdn/{patch}/data/en_US/champion.json',
+            timeout=10,
+        ).json()
+        for entry in champ_json['data'].values():
+            name = entry['name']
+            for cid, info in champion_data.items():
+                if info['name'] == name:
+                    info['key']  = entry['key']
+                    info['tags'] = entry.get('tags', [])
+                    break
+
+        # Item ID → name
+        try:
+            item_json = _requests.get(
+                f'https://ddragon.leagueoflegends.com/cdn/{patch}/data/en_US/item.json',
+                timeout=10,
+            ).json()
+            _ITEM_NAMES = {int(k): v['name'] for k, v in item_json['data'].items()}
+        except Exception:
+            pass
+
+        # Rune ID → name
+        try:
+            rune_json = _requests.get(
+                f'https://ddragon.leagueoflegends.com/cdn/{patch}/data/en_US/runesReforged.json',
+                timeout=10,
+            ).json()
+            for path in rune_json:
+                _RUNE_NAMES[path['id']] = path['name']
+                for slot in path.get('slots', []):
+                    for rune in slot.get('runes', []):
+                        _RUNE_NAMES[rune['id']] = rune['name']
+        except Exception:
+            pass
+
+        parts = patch.split('.')
+        return f"{parts[0]}.{parts[1]}"
+    except Exception as e:
+        print(f'DDragon enrichment failed: {e}')
+        return '16.9'
+
+
+# Power-curve heuristic from DDragon champion tags
+_POWER_CURVES = {
+    'Assassin':  [52, 72, 82, 68, 55],
+    'Fighter':   [60, 74, 76, 68, 62],
+    'Tank':      [44, 55, 66, 78, 84],
+    'Mage':      [40, 62, 80, 72, 62],
+    'Marksman':  [28, 48, 68, 84, 90],
+    'Support':   [46, 56, 62, 66, 68],
+    'Slayer':    [52, 72, 82, 68, 55],
+    'Catcher':   [46, 58, 66, 68, 66],
+    'Enchanter': [42, 55, 62, 66, 70],
+    'Warden':    [44, 55, 66, 78, 84],
+    'Juggernaut':[58, 68, 74, 78, 80],
+    'Diver':     [58, 72, 74, 66, 60],
+    'Specialist':[50, 62, 70, 68, 65],
+}
+_DEFAULT_CURVE = [50, 62, 72, 70, 65]
+
+
+def _power_curve(champion_id: str) -> list:
+    tags = CHAMPION_DATA.get(champion_id, {}).get('tags', [])
+    for tag in tags:
+        if tag in _POWER_CURVES:
+            return _POWER_CURVES[tag]
+    return _DEFAULT_CURVE
+
+
+def _team_curve(champion_ids: list) -> list:
+    curves = [_power_curve(c) for c in champion_ids if c in CHAMPION_DATA]
+    if not curves:
+        return _DEFAULT_CURVE
+    return [round(sum(c[i] for c in curves) / len(curves)) for i in range(5)]
 
 
 ROLE_MAP = {
@@ -373,67 +465,39 @@ class MockDataManager(DataManager):
         return None
 
 
-class LolatyticsWithFallback(DataManager):
-    """Uses LolatyticsClient for real data; falls back to MockDataManager on failure."""
-
-    def __init__(self, primary: DataManager, fallback: MockDataManager):
-        self._p = primary
-        self._f = fallback
-
-    async def fetch_champion_stats(self, patch: str, role: Role) -> List[ChampionStats]:
-        try:
-            stats = await self._p.fetch_champion_stats(patch, role)
-            if len(stats) >= 5:
-                return stats
-        except Exception:
-            pass
-        return await self._f.fetch_champion_stats(patch, role)
-
-    async def fetch_counter_data(self, patch: str, role: Role) -> List[CounterData]:
-        try:
-            data = await self._p.fetch_counter_data(patch, role)
-            if data:
-                return data
-        except Exception:
-            pass
-        return await self._f.fetch_counter_data(patch, role)
-
-    async def fetch_synergy_data(self, patch, role_a, role_b):
-        return await self._f.fetch_synergy_data(patch, role_a, role_b)
-
-    async def fetch_match_data(self, filters):
-        return []
-
-    def get_cached_data(self, key):
-        return self._f.get_cached_data(key)
-
-    def set_cached_data(self, key, data, ttl):
-        self._f.set_cached_data(key, data, ttl)
-
-    async def save_user_data(self, user_data):
-        pass
-
-    async def load_user_data(self):
-        return None
-
-
 template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'templates'))
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'static'))
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 app.secret_key = 'draft_advisor_secret_key'
 
 _mock = MockDataManager()
+_current_patch = _enrich_champion_data_with_keys(CHAMPION_DATA)
 try:
     from ..data.lolalytics_client import LolatyticsClient
-    _lolalytics = LolatyticsClient(CHAMPION_DATA, CHAMPIONS_BY_ROLE)
-    data_manager = LolatyticsWithFallback(_lolalytics, _mock)
-    print('Using Lolalytics real data (win/pick/ban rates + counter matchups)')
+    data_manager = LolatyticsClient(CHAMPION_DATA, _current_patch)
+    print(f'Using Lolalytics real data (patch {_current_patch}, global Emerald+)')
 except Exception as e:
     print(f'Lolalytics unavailable ({e}) — using mock data')
     data_manager = _mock
 
 scorer = StandardScorer()
 engine = StandardSuggestionEngine(data_manager, scorer)
+
+# ── LCU live overlay ──────────────────────────────────────────────────────
+# Build numeric-key → champion_id map from the DDragon-enriched data
+_champ_key_map: dict = {
+    int(info['key']): cid
+    for cid, info in CHAMPION_DATA.items()
+    if info.get('key', '').isdigit()
+}
+
+try:
+    from ..lcu.connector import LCUService
+    _lcu = LCUService(_champ_key_map)
+    _lcu.start()
+except Exception as _lcu_err:
+    print(f'LCU service unavailable: {_lcu_err}')
+    _lcu = None
 
 
 @app.route('/')
@@ -450,7 +514,7 @@ def get_recommendations():
             data.get('allies', []),
             data.get('enemies', []),
             data.get('banned', []),
-            data.get('patch', '14.3'),
+            _current_patch,
             data.get('championPool', []),
             role,
         ))
@@ -466,6 +530,99 @@ def get_recommendations():
 @app.route('/api/champions')
 def get_champions():
     return jsonify(CHAMPION_DATA)
+
+
+@app.route('/api/champion_detail', methods=['POST'])
+def get_champion_detail():
+    try:
+        data      = request.get_json()
+        champ_id  = data.get('champion_id', '')
+        role      = ROLE_MAP.get(data.get('role', 'mid'), Role.MIDDLE)
+        allies    = data.get('allies', [])
+        enemies   = data.get('enemies', [])
+
+        result = asyncio.run(_champion_detail_async(champ_id, role, allies, enemies))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+async def _champion_detail_async(champ_id: str, role: Role, allies: list, enemies: list) -> dict:
+    # Build / rune data from Lolalytics (best-effort; may be empty)
+    lol_detail: dict = {}
+    if hasattr(data_manager, 'fetch_champion_detail'):
+        try:
+            lol_detail = await data_manager.fetch_champion_detail(_current_patch, champ_id, role)
+        except Exception:
+            pass
+
+    # Resolve item names — items come as [{id, wr, n}, ...]
+    raw_items = lol_detail.get('items', [])
+    build = []
+    for entry in raw_items:
+        iid  = entry['id']
+        name = _ITEM_NAMES.get(iid, '')
+        if name:
+            build.append({'id': iid, 'name': name, 'wr': entry.get('wr', 0)})
+
+    # Runes come as {pri:[ids], sec:[ids], mod:[ids], wr, n}
+    raw_runes = lol_detail.get('runes', {})
+    runes: dict = {}
+    if raw_runes.get('pri'):
+        runes = {
+            'pri': [{'id': rid, 'name': _RUNE_NAMES.get(rid, '')} for rid in raw_runes['pri']],
+            'sec': [{'id': rid, 'name': _RUNE_NAMES.get(rid, '')} for rid in raw_runes.get('sec', [])],
+            'mod': [{'id': rid, 'name': _RUNE_NAMES.get(rid, '')} for rid in raw_runes.get('mod', [])],
+            'wr':  raw_runes.get('wr', 0),
+            'n':   raw_runes.get('n', 0),
+        }
+
+    # Counter picks (champions that beat champ_id in this role)
+    counter_data = await data_manager.fetch_counter_data(_current_patch, role)
+    counters = []
+    for cd in counter_data:
+        if cd.champion_a == champ_id and cd.win_rate_b > 0.51:
+            counters.append({
+                'champion_id':   cd.champion_b,
+                'champion_name': CHAMPION_DATA.get(cd.champion_b, {}).get('name', cd.champion_b),
+                'win_rate':      round(cd.win_rate_b * 100, 1),
+                'risk':          'high' if cd.win_rate_b > 0.55 else 'mid',
+            })
+    counters.sort(key=lambda x: -x['win_rate'])
+    counters = counters[:5]
+
+    # Power spike curve — use real Lolalytics win-rate-by-game-length if available,
+    # fall back to tag-based heuristic for the recommended champion.
+    # Lolalytics has 7 game-length buckets: <20m, 20-25, 25-30, 30-35, 35-40, 40-45, 45+m
+    # Map to our 5 display stages: Lane(1-3), Lvl6, Mid(11), Late(16), Full(18)
+    raw_gl = lol_detail.get('game_length_wr', [])
+    if raw_gl and len(raw_gl) >= 5:
+        by_bucket = {entry['bucket']: entry['wr'] for entry in raw_gl}
+        # Stage mapping: Lane≈bucket2, Lvl6≈bucket2-3, Mid≈bucket3-4, Late≈bucket5, Full≈bucket6-7
+        def avg(*keys):
+            vals = [by_bucket[k] for k in keys if k in by_bucket]
+            return round(sum(vals) / len(vals), 1) if vals else 50.0
+        ally_curve = [
+            avg(1, 2),       # Lane
+            avg(2, 3),       # Lvl 6
+            avg(3, 4),       # Mid
+            avg(5),          # Late
+            avg(6, 7),       # Full
+        ]
+        # Enemy curve: flat at 50% (avg game win rate baseline) when enemy unknown
+        baseline = round(sum(e['wr'] * e['n'] for e in raw_gl) / max(sum(e['n'] for e in raw_gl), 1), 1)
+        enemy_curve = _team_curve(enemies) if enemies else [baseline] * 5
+    else:
+        ally_curve  = _team_curve([champ_id] + allies)
+        enemy_curve = _team_curve(enemies) if enemies else [55, 65, 66, 64, 60]
+
+    return {
+        'build':        build,
+        'runes':        runes,
+        'counters':     counters,
+        'power_curve':  {'ally': ally_curve, 'enemy': enemy_curve},
+        'game_length_wr': raw_gl,
+    }
 
 
 async def _generate_recommendations_async(allies, enemies, banned, patch, champion_pool, role):
@@ -501,8 +658,54 @@ def _fmt(rec):
     }
 
 
+@app.route('/api/lcu/status')
+def lcu_status():
+    """Is the League client connected and in champion select?"""
+    if _lcu is None:
+        return jsonify({'connected': False, 'active': False})
+    state = _lcu.current()
+    return jsonify({
+        'connected': _lcu._connector.port is not None,
+        'active':    state is not None,
+        'state':     state,
+    })
+
+
+@app.route('/api/lcu/stream')
+def lcu_stream():
+    """SSE stream — pushes champion select state on every change."""
+    if _lcu is None:
+        return Response('data: {}\n\n', mimetype='text/event-stream')
+
+    def generate():
+        q = _lcu.subscribe()
+        try:
+            # Send current state immediately on connect
+            current = _lcu.current()
+            yield f'data: {json.dumps(current)}\n\n'
+            while True:
+                try:
+                    state = q.get(timeout=25)
+                    yield f'data: {json.dumps(state)}\n\n'
+                except Exception:
+                    # keepalive comment so the connection stays open
+                    yield ': ka\n\n'
+        finally:
+            _lcu.unsubscribe(q)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': '*',
+        },
+    )
+
+
 def run_web_app(host='127.0.0.1', port=8080, debug=True):
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, threaded=True)
 
 
 if __name__ == '__main__':

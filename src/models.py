@@ -88,6 +88,7 @@ class ChampionStats:
     ban_rate: float
     patch: str
     rank_tier: str
+    patch_delta_wr: Optional[float] = None  # win-rate change vs previous patch (pp)
 
 
 @dataclass
@@ -140,6 +141,7 @@ class CounterData:
     win_rate_b: float  # championB win rate vs championA
     sample_size: int
     patch: str
+    relative_advantage: Optional[float] = None  # d1: vsWr - enemy's overall WR (percentage points)
 
 
 @dataclass

@@ -2,141 +2,140 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Draft Advisor</title>
+    <meta name="viewport" content="width=1280">
+    <title>Drafted — Draft Advisor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <header class="header">
-        <div class="header-logo">&#9876; Draft Advisor</div>
-        <nav class="role-tabs" id="role-tabs">
-            <button class="role-tab" data-role="top">Top</button>
-            <button class="role-tab" data-role="jungle">Jungle</button>
-            <button class="role-tab active" data-role="mid">Mid</button>
-            <button class="role-tab" data-role="bottom">Bot</button>
-            <button class="role-tab" data-role="support">Support</button>
-        </nav>
-        <div class="view-tabs">
-            <button class="view-tab active" data-tab="overall">Best Overall</button>
-            <button class="view-tab" data-tab="pool">From My Pool</button>
+<div id="app">
+
+    <!-- ── Header ── -->
+    <header class="d2-header">
+        <div class="d2-header-left">
+            <div class="d2-brand">
+                <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="d2logo" x1="0" x2="1" y1="0" y2="1">
+                            <stop offset="0%" stop-color="#a78bfa"/>
+                            <stop offset="100%" stop-color="#5eb1ff"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="M11 1l9 6v8l-9 6-9-6V7z" fill="url(#d2logo)"/>
+                    <path d="M7 9l4 3 4-3v6l-4 3-4-3z" fill="#06080d"/>
+                </svg>
+                <span class="d2-wordmark">Drafted</span>
+                <span class="d2-patch-chip" id="patch-chip">--</span>
+            </div>
+            <div class="d2-vdivider"></div>
+            <div class="d2-role-picker" id="role-picker-btn">
+                <svg class="d2-role-svg" id="header-role-svg" width="12" height="12" viewBox="0 0 16 16"></svg>
+                <span class="d2-role-name" id="header-role-name">Mid Lane</span>
+                <svg width="8" height="6" viewBox="0 0 8 6" class="d2-caret" aria-hidden="true">
+                    <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="d2-role-dropdown" id="role-dropdown"></div>
+        </div>
+        <div class="d2-header-right">
+            <div class="d2-live">
+                <div class="d2-live-dot"></div>
+                <span class="d2-live-label">LIVE</span>
+                <span class="d2-timer" id="live-timer">0:00</span>
+            </div>
+            <div class="d2-vdivider"></div>
+            <div class="d2-filter-tabs" id="filter-tabs">
+                <button class="d2-ftab active" data-filter="best">Best</button>
+                <button class="d2-ftab" data-filter="pool">Pool</button>
+                <button class="d2-ftab" data-filter="comfort">Comfort</button>
+            </div>
         </div>
     </header>
 
-    <div class="page-body">
-        <aside class="draft-panel">
-            <div class="draft-section">
-                <div class="draft-label">Ally Picks</div>
-                <div class="slot-grid" id="ally-slots">
-                    <div class="champ-slot empty" data-type="ally" data-index="0"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ally" data-index="1"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ally" data-index="2"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ally" data-index="3"><span class="slot-plus">+</span></div>
-                </div>
-            </div>
-            <div class="draft-section">
-                <div class="draft-label">Enemy Picks</div>
-                <div class="slot-grid" id="enemy-slots">
-                    <div class="champ-slot empty" data-type="enemy" data-index="0"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="enemy" data-index="1"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="enemy" data-index="2"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="enemy" data-index="3"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="enemy" data-index="4"><span class="slot-plus">+</span></div>
-                </div>
-            </div>
-            <div class="draft-section">
-                <div class="draft-label">Bans</div>
-                <div class="slot-grid" id="ban-slots">
-                    <div class="champ-slot empty" data-type="ban" data-index="0"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ban" data-index="1"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ban" data-index="2"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ban" data-index="3"><span class="slot-plus">+</span></div>
-                    <div class="champ-slot empty" data-type="ban" data-index="4"><span class="slot-plus">+</span></div>
-                </div>
-            </div>
-            <div class="draft-section">
-                <div class="draft-label">My Champion Pool</div>
-                <input class="pool-input" id="pool-input" type="text" placeholder="Type name + Enter...">
-                <div class="pool-tags" id="pool-tags"></div>
-            </div>
-        </aside>
-
-        <main class="rec-panel">
-            <div class="rec-table-header">
-                <span class="col-rank">#</span>
-                <span class="col-champ">Champion</span>
-                <span class="col-tier">Tier</span>
-                <span class="col-score">Score</span>
-                <span class="col-stat">Win%</span>
-                <span class="col-stat">Pick%</span>
-                <span class="col-stat">Ban%</span>
-            </div>
-            <div id="recommendations"></div>
-        </main>
-
-        <aside class="detail-panel">
-            <div class="detail-top">
-                <div class="detail-avatar" id="detail-avatar">?</div>
-                <div class="detail-meta">
-                    <div class="detail-name" id="detail-name">Select a champion</div>
-                    <div class="detail-sub">
-                        <span class="detail-tier-badge" id="detail-tier"></span>
-                        <span class="detail-score-val" id="detail-score"></span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="detail-stats-row">
-                <div class="dstat"><div class="dstat-label">Win%</div><div class="dstat-val" id="dstat-wr">--</div></div>
-                <div class="dstat"><div class="dstat-label">Pick%</div><div class="dstat-val" id="dstat-pr">--</div></div>
-                <div class="dstat"><div class="dstat-label">Ban%</div><div class="dstat-val" id="dstat-br">--</div></div>
-            </div>
-
-            <div class="detail-bars">
-                <div class="bar-row">
-                    <span class="bar-label">Meta</span>
-                    <div class="bar-track"><div class="bar-fill meta" id="bar-meta" style="width:0%"></div></div>
-                    <span class="bar-val" id="val-meta">--</span>
-                </div>
-                <div class="bar-row">
-                    <span class="bar-label">Synergy</span>
-                    <div class="bar-track"><div class="bar-fill synergy" id="bar-synergy" style="width:0%"></div></div>
-                    <span class="bar-val" id="val-synergy">--</span>
-                </div>
-                <div class="bar-row">
-                    <span class="bar-label">Counter</span>
-                    <div class="bar-track"><div class="bar-fill counter" id="bar-counter" style="width:0%"></div></div>
-                    <span class="bar-val" id="val-counter">--</span>
-                </div>
-                <div class="bar-row" id="pool-bar-row" style="display:none">
-                    <span class="bar-label">Pool</span>
-                    <div class="bar-track"><div class="bar-fill pool" id="bar-pool" style="width:0%"></div></div>
-                    <span class="bar-val" id="val-pool">--</span>
-                </div>
-            </div>
-
-            <div class="detail-reasons">
-                <div class="reasons-title">Why this pick</div>
-                <ul class="reasons-list" id="reasons-list">
-                    <li>Select a recommendation to see analysis.</li>
-                </ul>
-            </div>
-        </aside>
-    </div>
-
-    <!-- Champion picker modal -->
-    <div class="modal" id="modal">
-        <div class="modal-box">
-            <div class="modal-head">
-                <span>Select Champion</span>
-                <button class="modal-close" id="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input class="modal-search" id="modal-search" type="text" placeholder="Search champions...">
-                <div class="champ-grid" id="champ-grid"></div>
-            </div>
+    <!-- ── Bans bar ── -->
+    <div class="d2-bans-bar">
+        <div class="d2-bans-group">
+            <span class="d2-bans-label blue">BLUE BANS</span>
+            <div class="d2-ban-row" id="ally-bans"></div>
+        </div>
+        <div class="d2-bans-center">
+            <span class="d2-phase-txt">PICK <span id="picks-count">0</span> OF 10</span>
+            <div class="d2-picks-track"><div class="d2-picks-fill" id="picks-fill"></div></div>
+        </div>
+        <div class="d2-bans-group">
+            <div class="d2-ban-row" id="enemy-bans"></div>
+            <span class="d2-bans-label red">RED BANS</span>
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <!-- ── 3-column body ── -->
+    <div class="d2-body">
+
+        <!-- Ally rail -->
+        <aside class="d2-rail" id="ally-rail">
+            <div class="d2-rail-head">
+                <span class="d2-rail-label blue">BLUE TEAM</span>
+                <span class="d2-rail-sub" id="ally-lock-count">0 / 5 LOCKED</span>
+            </div>
+            <div class="d2-roster" id="ally-roster"></div>
+        </aside>
+
+        <!-- Center -->
+        <main class="d2-center" id="d2-center">
+            <div id="state-loading" class="d2-state">
+                <div class="d2-spinner"></div>
+                <span>Analyzing draft…</span>
+            </div>
+            <div id="state-empty" class="d2-state" style="display:none">
+                <span class="d2-state-icon">⚡</span>
+                <span>Add picks to see recommendations.</span>
+            </div>
+            <div id="rec-content" style="display:none">
+                <div id="hero-card"></div>
+                <div id="power-spike-panel"></div>
+                <div class="d2-row2">
+                    <div id="why-panel"></div>
+                    <div id="counters-panel"></div>
+                </div>
+                <div id="build-runes-panel"></div>
+                <div id="alts-panel"></div>
+            </div>
+            <!-- Pool management bar (shown in Pool mode) -->
+            <div id="pool-bar" class="d2-pool-bar" style="display:none">
+                <span class="d2-pool-label">POOL</span>
+                <input id="pool-input" class="d2-pool-input" type="text" placeholder="Type champion + Enter…">
+                <div id="pool-tags" class="d2-pool-tags"></div>
+            </div>
+        </main>
+
+        <!-- Enemy rail -->
+        <aside class="d2-rail right" id="enemy-rail">
+            <div class="d2-rail-head right">
+                <span class="d2-rail-label red">RED TEAM</span>
+                <span class="d2-rail-sub" id="enemy-lock-count">0 / 5 LOCKED</span>
+            </div>
+            <div class="d2-roster" id="enemy-roster"></div>
+        </aside>
+
+    </div>
+</div>
+
+<!-- Champion picker modal -->
+<div class="d2-modal-overlay" id="modal">
+    <div class="d2-modal-box">
+        <div class="d2-modal-head">
+            <span id="modal-title">Select Champion</span>
+            <button class="d2-modal-close" id="modal-close">&times;</button>
+        </div>
+        <div class="d2-modal-body">
+            <input class="d2-modal-search" id="modal-search" type="text" placeholder="Search champions…">
+            <div class="d2-champ-grid" id="champ-grid"></div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

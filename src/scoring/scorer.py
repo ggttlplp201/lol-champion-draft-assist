@@ -61,7 +61,13 @@ class StandardScorer(ChampionScorer):
     def calculate_meta_score(self, champion: Champion, stats: ChampionStats) -> float:
         if not stats:
             return 50.0
-        return self._normalize_to_scale(stats.win_rate, 0.35, 0.65, 0, 100)
+        base = self._normalize_to_scale(stats.win_rate, 0.35, 0.65, 0, 100)
+        # Patch momentum: each ±1pp change in win rate shifts score by ±3 points,
+        # capped at ±10 so one patch swing doesn't dominate.
+        if stats.patch_delta_wr is not None:
+            momentum = max(-10.0, min(10.0, stats.patch_delta_wr * 3.0))
+            base = max(0.0, min(100.0, base + momentum))
+        return base
     
     def calculate_synergy_score(
         self, 
@@ -105,8 +111,12 @@ class StandardScorer(ChampionScorer):
         for enemy in enemy_champions:
             counter = self._find_counter_data(champion.id, enemy.id, counter_data)
             if counter:
-                # Normalize win rate from typical range (0.3-0.7) to 0-100
-                score = self._normalize_to_scale(counter.win_rate_a, 0.3, 0.7, 0, 100)
+                if counter.relative_advantage is not None:
+                    # d1 = vsWr - enemy's overall WR, in percentage points.
+                    # Range roughly -20..+20 → map to 0..100 (neutral = 50 at d1=0).
+                    score = max(0.0, min(100.0, 50.0 + counter.relative_advantage * 2.5))
+                else:
+                    score = self._normalize_to_scale(counter.win_rate_a, 0.3, 0.7, 0, 100)
                 counter_scores.append(score)
             else:
                 counter_scores.append(self._hash_pair_score(champion.id, enemy.id, 'ctr'))
