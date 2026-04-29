@@ -138,8 +138,8 @@ class StandardSuggestionEngine(SuggestionEngine):
         
         # Return top 5 from each category as per requirements 7.3, 7.4
         return RecommendationResult(
-            champion_pool_recommendations=pool_recommendations[:5],
-            overall_recommendations=all_recommendations[:5],
+            champion_pool_recommendations=pool_recommendations,
+            overall_recommendations=all_recommendations,
             timestamp=datetime.now()
         )
     

@@ -455,8 +455,8 @@ def get_recommendations():
             role,
         ))
         return jsonify({
-            'championPoolRecommendations': [_fmt(r) for r in result.champion_pool_recommendations[:5]],
-            'overallRecommendations': [_fmt(r) for r in result.overall_recommendations[:5]],
+            'championPoolRecommendations': [_fmt(r) for r in result.champion_pool_recommendations],
+            'overallRecommendations': [_fmt(r) for r in result.overall_recommendations],
             'timestamp': result.timestamp.isoformat(),
         })
     except Exception as e:
