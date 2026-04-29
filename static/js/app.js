@@ -1,380 +1,323 @@
 class DraftAdvisor {
     constructor() {
         this.champions = {};
-        this.draftState = {
-            allies: [],
-            enemies: [],
-            banned: [],
-            championPool: []
-        };
-        this.currentTab = 'overall';
+        this.role = 'mid';
+        this.tab = 'overall';
+        this.draft = { allies: [], enemies: [], banned: [], pool: [] };
         this.currentSlot = null;
-        this.lastRecommendationData = null;
+        this.lastData = null;
 
         this.init();
     }
 
     async init() {
         await this.loadChampions();
-        this.setupEventListeners();
-        this.updateRecommendations();
+        this.bindEvents();
+        this.fetchRecs();
     }
 
     async loadChampions() {
         try {
-            const response = await fetch('/api/champions');
-            this.champions = await response.json();
-        } catch (error) {
-            console.error('Failed to load champions:', error);
-        }
+            const r = await fetch('/api/champions');
+            this.champions = await r.json();
+        } catch (e) { console.error(e); }
     }
 
-    setupEventListeners() {
-        document.querySelectorAll('.tab-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                this.switchTab(e.target.dataset.tab);
+    bindEvents() {
+        // Role tabs
+        document.querySelectorAll('.role-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.role-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.role = btn.dataset.role;
+                this.fetchRecs();
             });
         });
 
-        document.querySelectorAll('.champion-slot').forEach(slot => {
+        // View tabs
+        document.querySelectorAll('.view-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.tab = btn.dataset.tab;
+                if (this.lastData) this.renderRecs(this.lastData);
+            });
+        });
+
+        // Champion slots
+        document.querySelectorAll('.champ-slot').forEach(slot => {
             slot.addEventListener('click', () => {
-                if (slot.classList.contains('empty')) {
-                    this.openChampionModal(slot);
-                }
+                if (slot.classList.contains('empty')) this.openModal(slot);
             });
         });
 
-        const poolInput = document.querySelector('.champion-pool-input');
-        poolInput.addEventListener('keypress', (e) => {
+        // Pool input
+        document.getElementById('pool-input').addEventListener('keydown', e => {
             if (e.key === 'Enter') {
-                this.addToChampionPool(e.target.value.trim());
+                this.addToPool(e.target.value.trim());
                 e.target.value = '';
             }
         });
 
-        document.getElementById('close-modal').addEventListener('click', () => {
-            this.closeChampionModal();
+        // Modal
+        document.getElementById('modal-close').addEventListener('click', () => this.closeModal());
+        document.getElementById('modal').addEventListener('click', e => {
+            if (e.target.id === 'modal') this.closeModal();
+        });
+        document.getElementById('modal-search').addEventListener('input', e => {
+            this.filterModal(e.target.value);
         });
 
-        document.getElementById('champion-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'champion-modal') {
-                this.closeChampionModal();
-            }
-        });
-
-        document.getElementById('champion-search').addEventListener('input', (e) => {
-            this.filterChampions(e.target.value);
-        });
-
-        document.addEventListener('click', (e) => {
-            const card = e.target.closest('.recommendation-card');
-            if (card) this.selectRecommendation(card);
+        // Rec row click
+        document.getElementById('recommendations').addEventListener('click', e => {
+            const row = e.target.closest('.rec-row');
+            if (row) this.selectRow(row);
         });
     }
 
-    switchTab(tab) {
-        this.currentTab = tab;
-        document.querySelectorAll('.tab-button').forEach(button => {
-            button.classList.toggle('active', button.dataset.tab === tab);
-        });
-        if (this.lastRecommendationData) {
-            this.displayRecommendations(this.lastRecommendationData);
-        } else {
-            this.updateRecommendations();
-        }
-    }
+    // ── Recommendations ───────────────────────────────────────
 
-    openChampionModal(slot) {
-        this.currentSlot = slot;
-        document.getElementById('champion-modal').style.display = 'flex';
-        this.populateChampionGrid();
-        const search = document.getElementById('champion-search');
-        search.value = '';
-        search.focus();
-    }
-
-    closeChampionModal() {
-        document.getElementById('champion-modal').style.display = 'none';
-        this.currentSlot = null;
-    }
-
-    populateChampionGrid() {
-        const grid = document.getElementById('champion-grid');
-        grid.innerHTML = '';
-
-        const used = new Set([
-            ...this.draftState.allies.filter(Boolean),
-            ...this.draftState.enemies.filter(Boolean),
-            ...this.draftState.banned.filter(Boolean),
-        ]);
-
-        Object.entries(this.champions).forEach(([id, champion]) => {
-            const option = document.createElement('div');
-            option.className = 'champion-option' + (used.has(id) ? ' disabled' : '');
-            option.dataset.championId = id;
-            option.innerHTML = `
-                <div class="champ-icon">${champion.name.charAt(0)}</div>
-                <span>${champion.name}</span>
-            `;
-            if (!used.has(id)) {
-                option.addEventListener('click', () => this.selectChampion(id));
-            }
-            grid.appendChild(option);
-        });
-    }
-
-    filterChampions(searchTerm) {
-        const term = searchTerm.toLowerCase();
-        document.querySelectorAll('.champion-option').forEach(option => {
-            const name = option.querySelector('span').textContent.toLowerCase();
-            option.style.display = name.includes(term) ? '' : 'none';
-        });
-    }
-
-    selectChampion(championId) {
-        if (!this.currentSlot) return;
-
-        const slotType = this.currentSlot.dataset.type;
-        const slotIndex = parseInt(this.currentSlot.dataset.index);
-
-        if (slotType === 'ally') this.draftState.allies[slotIndex] = championId;
-        else if (slotType === 'enemy') this.draftState.enemies[slotIndex] = championId;
-        else if (slotType === 'ban') this.draftState.banned[slotIndex] = championId;
-
-        this.updateChampionSlot(this.currentSlot, championId, slotType);
-        this.closeChampionModal();
-        this.updateRecommendations();
-    }
-
-    updateChampionSlot(slot, championId, slotType) {
-        const champion = this.champions[championId];
-        if (!champion) return;
-
-        slot.classList.remove('empty');
-        slot.classList.add('filled');
-        slot.dataset.championId = championId;
-
-        const colorClass = slotType === 'ally' ? 'ally' : slotType === 'enemy' ? 'enemy' : 'ban';
-        slot.innerHTML = `
-            <div class="slot-icon ${colorClass}">${champion.name.charAt(0)}</div>
-            <div class="slot-label">${champion.name}</div>
-            <button class="remove-champion" onclick="draftAdvisor.removeChampion(this)">&times;</button>
-        `;
-    }
-
-    removeChampion(button) {
-        const slot = button.closest('.champion-slot');
-        const slotType = slot.dataset.type;
-        const slotIndex = parseInt(slot.dataset.index);
-
-        if (slotType === 'ally') this.draftState.allies[slotIndex] = null;
-        else if (slotType === 'enemy') this.draftState.enemies[slotIndex] = null;
-        else if (slotType === 'ban') this.draftState.banned[slotIndex] = null;
-
-        slot.classList.remove('filled');
-        slot.classList.add('empty');
-        slot.innerHTML = '<span class="plus-icon">+</span>';
-        delete slot.dataset.championId;
-
-        this.updateRecommendations();
-    }
-
-    addToChampionPool(championName) {
-        if (!championName) return;
-        const championId = Object.keys(this.champions).find(id =>
-            this.champions[id].name.toLowerCase() === championName.toLowerCase()
-        );
-        if (championId && !this.draftState.championPool.includes(championId)) {
-            this.draftState.championPool.push(championId);
-            this.updateChampionPoolDisplay();
-            this.updateRecommendations();
-        }
-    }
-
-    updateChampionPoolDisplay() {
-        const container = document.getElementById('champion-pool');
-        container.innerHTML = '';
-        this.draftState.championPool.forEach(championId => {
-            const champion = this.champions[championId];
-            if (!champion) return;
-            const tag = document.createElement('div');
-            tag.className = 'pool-champion';
-            tag.innerHTML = `
-                ${champion.name}
-                <span class="remove" onclick="draftAdvisor.removeFromChampionPool('${championId}')">&times;</span>
-            `;
-            container.appendChild(tag);
-        });
-    }
-
-    removeFromChampionPool(championId) {
-        this.draftState.championPool = this.draftState.championPool.filter(id => id !== championId);
-        this.updateChampionPoolDisplay();
-        this.updateRecommendations();
-    }
-
-    async updateRecommendations() {
-        const container = document.getElementById('recommendations');
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><span>Analyzing draft...</span></div>';
+    async fetchRecs() {
+        const el = document.getElementById('recommendations');
+        el.innerHTML = '<div class="state-box"><div class="spinner"></div><p>Analyzing draft...</p></div>';
 
         try {
-            const cleanDraftState = {
-                allies: this.draftState.allies.filter(Boolean),
-                enemies: this.draftState.enemies.filter(Boolean),
-                banned: this.draftState.banned.filter(Boolean),
-                championPool: this.draftState.championPool,
-                patch: '14.3'
+            const body = {
+                role: this.role,
+                allies: this.draft.allies.filter(Boolean),
+                enemies: this.draft.enemies.filter(Boolean),
+                banned: this.draft.banned.filter(Boolean),
+                championPool: this.draft.pool,
+                patch: '14.3',
             };
-
-            const response = await fetch('/api/recommendations', {
+            const r = await fetch('/api/recommendations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(cleanDraftState)
+                body: JSON.stringify(body),
             });
-
-            const data = await response.json();
+            const data = await r.json();
             if (data.error) throw new Error(data.error);
-
-            this.lastRecommendationData = data;
-            this.displayRecommendations(data);
-        } catch (error) {
-            console.error('Failed to get recommendations:', error);
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">!</div>
-                    <h3>Error loading recommendations</h3>
-                    <p>Please try again.</p>
-                </div>
-            `;
+            this.lastData = data;
+            this.renderRecs(data);
+        } catch (e) {
+            el.innerHTML = `<div class="state-box"><h3>Error</h3><p>${e.message}</p></div>`;
         }
     }
 
-    displayRecommendations(data) {
-        const container = document.getElementById('recommendations');
-        const recommendations = this.currentTab === 'pool'
-            ? data.championPoolRecommendations
-            : data.overallRecommendations;
+    renderRecs(data) {
+        const list = this.tab === 'pool' ? data.championPoolRecommendations : data.overallRecommendations;
+        const el = document.getElementById('recommendations');
 
-        if (!recommendations || recommendations.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">?</div>
-                    <h3>${this.currentTab === 'pool' ? 'No Pool Picks' : 'Ready to Draft'}</h3>
-                    <p>${this.currentTab === 'pool'
-                        ? 'Add champions to your pool below.'
-                        : 'Add ally and enemy picks to get personalized recommendations.'}</p>
-                </div>
-            `;
+        if (!list || list.length === 0) {
+            const msg = this.tab === 'pool'
+                ? 'Add champions to your pool to see personalized picks.'
+                : 'Add ally and enemy picks to refine recommendations.';
+            el.innerHTML = `<div class="state-box"><h3>No picks yet</h3><p>${msg}</p></div>`;
             return;
         }
 
-        container.innerHTML = '';
-        recommendations.forEach((rec, index) => {
-            const card = document.createElement('div');
-            card.className = 'recommendation-card';
-            card.dataset.championId = rec.championId;
-            card.dataset.recIndex = index;
-            card.dataset.recData = JSON.stringify(rec);
-
-            const scoreColor = this.getScoreColor(rec.score);
-            const meta = rec.scoreBreakdown.metaScore;
-            const synergy = rec.scoreBreakdown.synergyScore;
-            const counter = rec.scoreBreakdown.counterScore;
-
-            card.innerHTML = `
-                <div class="rec-rank">${index + 1}</div>
-                <div class="rec-avatar">${rec.championName.charAt(0)}</div>
-                <div class="rec-body">
-                    <div class="rec-header">
-                        <span class="rec-name">${rec.championName}</span>
-                        <span class="rec-score" style="color:${scoreColor}">${rec.score}</span>
-                    </div>
-                    <div class="rec-mini-bars">
-                        <div class="mini-bar-row">
-                            <span class="mini-label">Meta</span>
-                            <div class="mini-bar"><div class="mini-fill meta" style="width:${meta}%"></div></div>
-                        </div>
-                        <div class="mini-bar-row">
-                            <span class="mini-label">Syn</span>
-                            <div class="mini-bar"><div class="mini-fill synergy" style="width:${synergy}%"></div></div>
-                        </div>
-                        <div class="mini-bar-row">
-                            <span class="mini-label">Ctr</span>
-                            <div class="mini-bar"><div class="mini-fill counter" style="width:${counter}%"></div></div>
-                        </div>
-                    </div>
+        el.innerHTML = '';
+        list.forEach((rec, i) => {
+            const tier = this.getTier(rec.score);
+            const row = document.createElement('div');
+            row.className = 'rec-row';
+            row.dataset.rec = JSON.stringify(rec);
+            row.innerHTML = `
+                <span class="rec-rank">${i + 1}</span>
+                <div class="rec-champ-cell">
+                    <div class="rec-icon">${rec.championName[0]}</div>
+                    <span class="rec-name">${rec.championName}</span>
                 </div>
+                <div style="text-align:center">
+                    <span class="tier-badge tier-${tier.cls}">${tier.label}</span>
+                </div>
+                <span class="rec-score-val" style="color:${tier.color}">${rec.score}</span>
+                <span class="rec-stat rec-wr">${rec.winRate}%</span>
+                <span class="rec-stat">${rec.pickRate}%</span>
+                <span class="rec-stat">${rec.banRate}%</span>
             `;
-
-            container.appendChild(card);
+            el.appendChild(row);
         });
 
-        const firstCard = container.querySelector('.recommendation-card');
-        if (firstCard) this.selectRecommendation(firstCard);
+        // Auto-select first
+        const first = el.querySelector('.rec-row');
+        if (first) this.selectRow(first);
     }
 
-    selectRecommendation(card) {
-        document.querySelectorAll('.recommendation-card').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
-
-        const rec = JSON.parse(card.dataset.recData);
-        this.updateChampionDetail(rec);
+    selectRow(row) {
+        document.querySelectorAll('.rec-row').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+        this.updateDetail(JSON.parse(row.dataset.rec));
     }
 
-    updateChampionDetail(rec) {
-        const champion = this.champions[rec.championId];
-        const name = champion ? champion.name : rec.championName;
+    updateDetail(rec) {
+        const tier = this.getTier(rec.score);
+        document.getElementById('detail-avatar').textContent = rec.championName[0];
+        document.getElementById('detail-name').textContent = rec.championName;
 
-        document.getElementById('detail-champion-name').textContent = name;
-        const detailScore = document.getElementById('detail-total-score');
-        if (detailScore) {
-            detailScore.textContent = rec.score;
-            detailScore.style.color = this.getScoreColor(rec.score);
-        }
+        const tb = document.getElementById('detail-tier');
+        tb.textContent = tier.label;
+        tb.className = `detail-tier-badge tier-${tier.cls}`;
 
-        const avatar = document.getElementById('detail-champion-avatar');
-        avatar.textContent = name.charAt(0);
+        const sv = document.getElementById('detail-score');
+        sv.textContent = rec.score;
+        sv.style.color = tier.color;
+
+        document.getElementById('dstat-wr').textContent = rec.winRate + '%';
+        document.getElementById('dstat-pr').textContent = rec.pickRate + '%';
+        document.getElementById('dstat-br').textContent = rec.banRate + '%';
 
         const sb = rec.scoreBreakdown;
-        this.updateScoreBar('meta', sb.metaScore);
-        this.updateScoreBar('synergy', sb.synergyScore);
-        this.updateScoreBar('counter', sb.counterScore);
+        this.setBar('meta',    sb.metaScore);
+        this.setBar('synergy', sb.synergyScore);
+        this.setBar('counter', sb.counterScore);
 
-        const masteryBar = document.getElementById('mastery-bar');
+        const poolRow = document.getElementById('pool-bar-row');
         if (sb.confidenceBonus > 0) {
-            masteryBar.style.display = 'block';
-            this.updateScoreBar('mastery', Math.min(100, sb.confidenceBonus * 5));
+            poolRow.style.display = 'flex';
+            this.setBar('pool', Math.min(100, sb.confidenceBonus * 5));
         } else {
-            masteryBar.style.display = 'none';
+            poolRow.style.display = 'none';
         }
 
-        // Use actual explanations from the API
-        const explanationsList = document.getElementById('positive-explanations');
-        explanationsList.innerHTML = '';
-        (rec.explanations || []).forEach(text => {
+        const ul = document.getElementById('reasons-list');
+        ul.innerHTML = '';
+        (rec.explanations || []).forEach(txt => {
             const li = document.createElement('li');
-            li.textContent = text;
-            explanationsList.appendChild(li);
+            li.textContent = txt;
+            ul.appendChild(li);
         });
     }
 
-    updateScoreBar(type, score) {
-        const scoreEl = document.getElementById(`${type}-score`);
-        const fillEl = document.getElementById(`${type}-progress`);
-        if (scoreEl && fillEl) {
-            scoreEl.textContent = Math.round(score);
-            fillEl.style.width = `${Math.min(100, Math.max(0, score))}%`;
+    setBar(id, val) {
+        const v = Math.round(val);
+        document.getElementById(`bar-${id}`).style.width = `${Math.min(100, Math.max(0, val))}%`;
+        document.getElementById(`val-${id}`).textContent = v;
+    }
+
+    getTier(score) {
+        if (score >= 68) return { label: 'S+', cls: 'sp', color: 'var(--sp-c)' };
+        if (score >= 60) return { label: 'S',  cls: 's',  color: 'var(--s-c)'  };
+        if (score >= 55) return { label: 'A',  cls: 'a',  color: 'var(--a-c)'  };
+        if (score >= 50) return { label: 'B',  cls: 'b',  color: 'var(--b-c)'  };
+        if (score >= 45) return { label: 'C',  cls: 'c',  color: 'var(--c-c)'  };
+        return                   { label: 'D',  cls: 'd',  color: 'var(--d-c)'  };
+    }
+
+    // ── Draft slots ───────────────────────────────────────────
+
+    openModal(slot) {
+        this.currentSlot = slot;
+        const used = new Set([
+            ...this.draft.allies.filter(Boolean),
+            ...this.draft.enemies.filter(Boolean),
+            ...this.draft.banned.filter(Boolean),
+        ]);
+        const grid = document.getElementById('champ-grid');
+        grid.innerHTML = '';
+        Object.entries(this.champions).forEach(([id, c]) => {
+            const div = document.createElement('div');
+            div.className = 'champ-opt' + (used.has(id) ? ' used' : '');
+            div.dataset.id = id;
+            div.innerHTML = `
+                <div class="champ-opt-icon">${c.name[0]}</div>
+                <div class="champ-opt-name">${c.name}</div>
+            `;
+            if (!used.has(id)) {
+                div.addEventListener('click', () => this.pickChampion(id));
+            }
+            grid.appendChild(div);
+        });
+        document.getElementById('modal-search').value = '';
+        document.getElementById('modal').style.display = 'flex';
+        document.getElementById('modal-search').focus();
+    }
+
+    closeModal() {
+        document.getElementById('modal').style.display = 'none';
+        this.currentSlot = null;
+    }
+
+    filterModal(q) {
+        const term = q.toLowerCase();
+        document.querySelectorAll('.champ-opt').forEach(opt => {
+            const name = opt.querySelector('.champ-opt-name').textContent.toLowerCase();
+            opt.style.display = name.includes(term) ? '' : 'none';
+        });
+    }
+
+    pickChampion(id) {
+        if (!this.currentSlot) return;
+        const type  = this.currentSlot.dataset.type;
+        const index = parseInt(this.currentSlot.dataset.index);
+
+        if (type === 'ally')   this.draft.allies[index]  = id;
+        if (type === 'enemy')  this.draft.enemies[index] = id;
+        if (type === 'ban')    this.draft.banned[index]  = id;
+
+        this.fillSlot(this.currentSlot, id, type);
+        this.closeModal();
+        this.fetchRecs();
+    }
+
+    fillSlot(slot, id, type) {
+        const name = this.champions[id]?.name || id;
+        const initial = name[0];
+        slot.classList.remove('empty');
+        slot.classList.add('filled');
+        slot.innerHTML = `
+            <div class="slot-icon-box ${type}">${initial}</div>
+            <div class="slot-name">${name}</div>
+            <button class="slot-remove" onclick="app.removeSlot(this)">&times;</button>
+        `;
+    }
+
+    removeSlot(btn) {
+        const slot  = btn.closest('.champ-slot');
+        const type  = slot.dataset.type;
+        const index = parseInt(slot.dataset.index);
+
+        if (type === 'ally')  this.draft.allies[index]  = null;
+        if (type === 'enemy') this.draft.enemies[index] = null;
+        if (type === 'ban')   this.draft.banned[index]  = null;
+
+        slot.classList.remove('filled');
+        slot.classList.add('empty');
+        slot.innerHTML = '<span class="slot-plus">+</span>';
+        this.fetchRecs();
+    }
+
+    // ── Champion pool ─────────────────────────────────────────
+
+    addToPool(name) {
+        if (!name) return;
+        const id = Object.keys(this.champions).find(
+            k => this.champions[k].name.toLowerCase() === name.toLowerCase()
+        );
+        if (id && !this.draft.pool.includes(id)) {
+            this.draft.pool.push(id);
+            this.renderPool();
+            this.fetchRecs();
         }
     }
 
-    getScoreColor(score) {
-        if (score >= 70) return '#22c55e';
-        if (score >= 55) return '#f59e0b';
-        return '#ef4444';
+    removeFromPool(id) {
+        this.draft.pool = this.draft.pool.filter(x => x !== id);
+        this.renderPool();
+        this.fetchRecs();
+    }
+
+    renderPool() {
+        const el = document.getElementById('pool-tags');
+        el.innerHTML = '';
+        this.draft.pool.forEach(id => {
+            const name = this.champions[id]?.name || id;
+            const tag = document.createElement('div');
+            tag.className = 'pool-tag';
+            tag.innerHTML = `${name}<span class="pool-tag-remove" onclick="app.removeFromPool('${id}')">&times;</span>`;
+            el.appendChild(tag);
+        });
     }
 }
 
-let draftAdvisor;
-document.addEventListener('DOMContentLoaded', () => {
-    draftAdvisor = new DraftAdvisor();
-});
+const app = new DraftAdvisor();

@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
-"""
-Web server launcher for the Champion Draft Assist Tool.
-
-This script starts the Flask web application.
-"""
+"""Web server launcher for the Champion Draft Assist Tool."""
 
 import sys
 import os
 
-# Add the src directory to the Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Load .env.local before importing app so RIOT_API_KEY is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env.local'))
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    pass
+
+sys.path.insert(0, os.path.dirname(__file__))
 
 from src.interface.web_app import run_web_app
 
 if __name__ == '__main__':
-    import sys
     port = 5001 if len(sys.argv) == 1 else int(sys.argv[1])
-    
-    print("🎯 Starting Champion Draft Advisor Web Interface...")
-    print(f"📍 Open your browser to: http://127.0.0.1:{port}")
-    print("🛑 Press Ctrl+C to stop the server")
-    print()
-    
+    key = os.getenv('RIOT_API_KEY')
+    print(f"Draft Advisor -> http://127.0.0.1:{port}")
+    print(f"Data source: {'Riot API (live)' if key else 'mock data (set RIOT_API_KEY to use live)'}")
     try:
         run_web_app(host='127.0.0.1', port=port, debug=True)
     except KeyboardInterrupt:
-        print("\n👋 Server stopped. Thanks for using Draft Advisor!")
+        print("\nServer stopped.")

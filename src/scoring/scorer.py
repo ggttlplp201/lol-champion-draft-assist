@@ -58,19 +58,8 @@ class StandardScorer(ChampionScorer):
     """Standard implementation of champion scoring algorithms."""
     
     def calculate_meta_score(self, champion: Champion, stats: ChampionStats) -> float:
-        """
-        Calculate meta score based on patch-specific win rates for mid lane champions.
-        Normalizes win rate to 0-100 scale using typical mid lane win rate ranges.
-        
-        Requirements: 6.1, 8.2
-        - Uses role-specific patch win rates from Riot Games API
-        - Normalizes meta scores to 0-100 scale
-        """
-        if not stats or stats.role != Role.MIDDLE:
-            return 50.0  # Neutral score for invalid/missing data
-        
-        # Normalize win rate from typical mid lane range (0.35-0.65) to 0-100 scale
-        # Mid lane champions typically have win rates between 35% and 65%
+        if not stats:
+            return 50.0
         return self._normalize_to_scale(stats.win_rate, 0.35, 0.65, 0, 100)
     
     def calculate_synergy_score(

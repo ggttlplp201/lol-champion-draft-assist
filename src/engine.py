@@ -42,46 +42,21 @@ class StandardSuggestionEngine(SuggestionEngine):
             confidence_bonus=15.0
         )
         
-        # Champion ID to name mapping (MVP: basic mapping, will be enhanced with Data Dragon)
+        # Names that can't be derived from id.replace('_',' ').title()
         self.champion_names = {
-            "yasuo": "Yasuo",
-            "zed": "Zed", 
-            "ahri": "Ahri",
-            "katarina": "Katarina",
-            "azir": "Azir",
-            "cassiopeia": "Cassiopeia",
-            "diana": "Diana",
-            "fizz": "Fizz",
             "leblanc": "LeBlanc",
-            "lissandra": "Lissandra",
-            "malzahar": "Malzahar",
-            "orianna": "Orianna",
-            "syndra": "Syndra",
-            "talon": "Talon",
             "twisted_fate": "Twisted Fate",
-            "veigar": "Veigar",
-            "viktor": "Viktor",
-            "xerath": "Xerath",
-            "ziggs": "Ziggs",
-            "jinx": "Jinx",
-            "darius": "Darius",
-            "akali": "Akali",
-            "anivia": "Anivia",
-            "annie": "Annie",
-            "brand": "Brand",
-            "corki": "Corki",
-            "ekko": "Ekko",
-            "galio": "Galio",
-            "irelia": "Irelia",
-            "kassadin": "Kassadin",
-            "lux": "Lux",
-            "neeko": "Neeko",
-            "qiyana": "Qiyana",
-            "ryze": "Ryze",
-            "sylas": "Sylas",
             "vel_koz": "Vel'Koz",
-            "vladimir": "Vladimir",
-            "yone": "Yone"
+            "cho_gath": "Cho'Gath",
+            "kai_sa": "Kai'Sa",
+            "kha_zix": "Kha'Zix",
+            "kog_maw": "Kog'Maw",
+            "k_sante": "K'Sante",
+            "jarvan_iv": "Jarvan IV",
+            "miss_fortune": "Miss Fortune",
+            "master_yi": "Master Yi",
+            "lee_sin": "Lee Sin",
+            "renata_glasc": "Renata Glasc",
         }
     
     async def generate_recommendations(
@@ -266,7 +241,10 @@ class StandardSuggestionEngine(SuggestionEngine):
             champion=champion,
             score=final_score,
             explanations=explanations,
-            score_breakdown=score_breakdown
+            score_breakdown=score_breakdown,
+            win_rate=stats.win_rate,
+            pick_rate=stats.pick_rate,
+            ban_rate=stats.ban_rate,
         )
     
     def _generate_explanations(
@@ -343,9 +321,4 @@ class StandardSuggestionEngine(SuggestionEngine):
         return explanations[:max_explanations]
     
     def _get_champion_name(self, champion_id: str) -> str:
-        """
-        Get proper champion name from champion ID.
-        
-        MVP: Uses basic mapping, will be enhanced with Data Dragon API.
-        """
-        return self.champion_names.get(champion_id, champion_id.title())
+        return self.champion_names.get(champion_id, champion_id.replace('_', ' ').title())

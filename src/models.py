@@ -55,6 +55,9 @@ class ChampionRecommendation:
     score: float
     explanations: List[str]
     score_breakdown: ScoreBreakdown
+    win_rate: float = 0.50
+    pick_rate: float = 0.05
+    ban_rate: float = 0.02
 
 
 @dataclass
