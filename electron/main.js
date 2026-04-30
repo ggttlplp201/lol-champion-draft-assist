@@ -37,7 +37,8 @@ function startFlask() {
 
   if (IS_PACKED) {
     // Packaged app: use the bundled PyInstaller binary
-    bin  = path.join(process.resourcesPath, 'server', 'DraftAdvisorServer');
+    const exeName = process.platform === 'win32' ? 'DraftAdvisorServer.exe' : 'DraftAdvisorServer';
+    bin  = path.join(process.resourcesPath, 'server', exeName);
     args = [];
     cwd  = process.resourcesPath;
     console.log('[electron] using bundled server:', bin);

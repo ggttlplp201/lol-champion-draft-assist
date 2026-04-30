@@ -19,7 +19,7 @@ a = Analysis(
         'aiohttp', 'aiohttp.connector', 'aiohttp.client',
         'aiohttp.client_reqrep', 'aiohttp.streams',
         'aiosignal', 'frozenlist', 'multidict', 'yarl', 'attr', 'attrs',
-        'psutil', 'psutil._psmacosx', 'psutil._psposix',
+        'psutil',
         'requests', 'requests.adapters', 'requests.packages',
         'urllib3', 'urllib3.util', 'urllib3.util.retry',
         'dotenv',
