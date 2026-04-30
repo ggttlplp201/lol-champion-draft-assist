@@ -1,4 +1,4 @@
-# Draft Advisor
+# What is Drafted?
 
 A real-time champion select overlay for League of Legends. Connects to your local League client, reads the live ban/pick state automatically, and surfaces data-driven recommendations — counters, synergies, builds, runes, and win-rate curves — without leaving champion select.
 
