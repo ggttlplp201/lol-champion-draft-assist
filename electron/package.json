@@ -21,20 +21,9 @@
     },
     "extraResources": [
       {
-        "from": "../",
-        "to": "app",
-        "filter": [
-          "**/*",
-          "!electron/**",
-          "!dist/**",
-          "!venv/**",
-          "!.git/**",
-          "!tests/**",
-          "!*.md",
-          "!pytest.ini"
-        ]
+        "from": "../dist/DraftAdvisorServer",
+        "to": "server"
       }
-    ],
-    "afterPack": "../electron/after-pack.js"
+    ]
   }
 }

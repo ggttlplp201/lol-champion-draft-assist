@@ -467,8 +467,14 @@ class MockDataManager(DataManager):
         return None
 
 
-template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'templates'))
-static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'static'))
+import sys as _sys
+if getattr(_sys, 'frozen', False):
+    # Running as PyInstaller bundle — all data lands in sys._MEIPASS
+    _base = _sys._MEIPASS
+else:
+    _base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+template_dir = os.path.join(_base, 'templates')
+static_dir   = os.path.join(_base, 'static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 app.secret_key = 'draft_advisor_secret_key'
 
@@ -804,7 +810,10 @@ def lcu_stream():
 
 
 def run_web_app(host='127.0.0.1', port=8080, debug=True):
-    app.run(host=host, port=port, debug=debug, threaded=True)
+    # Disable the reloader when frozen (PyInstaller binary) — it tries to re-exec
+    # the binary as a Python script which fails.
+    use_reloader = debug and not getattr(_sys, 'frozen', False)
+    app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=use_reloader)
 
 
 if __name__ == '__main__':

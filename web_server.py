@@ -17,11 +17,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 from src.interface.web_app import run_web_app
 
 if __name__ == '__main__':
-    port = 5001 if len(sys.argv) == 1 else int(sys.argv[1])
+    # When frozen by PyInstaller sys.argv may contain unexpected flags — ignore them
+    try:
+        port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 5001
+    except (IndexError, ValueError):
+        port = 5001
     key = os.getenv('RIOT_API_KEY')
     print(f"Draft Advisor -> http://127.0.0.1:{port}")
     print(f"Data source: {'Riot API (live)' if key else 'mock data (set RIOT_API_KEY to use live)'}")
+    frozen = getattr(sys, 'frozen', False)
     try:
-        run_web_app(host='127.0.0.1', port=port, debug=True)
+        run_web_app(host='127.0.0.1', port=port, debug=not frozen)
     except KeyboardInterrupt:
         print("\nServer stopped.")

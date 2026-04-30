@@ -19,12 +19,8 @@ let flaskProc = null;
 
 function getPython() {
   const candidates = [
-    // Venv (dev mode)
     path.join(PROJECT_ROOT, 'venv', 'bin', 'python'),
     path.join(PROJECT_ROOT, 'venv', 'bin', 'python3'),
-    // Bundled venv (packed app)
-    path.join(process.resourcesPath, 'venv', 'bin', 'python'),
-    // System fallback
     '/usr/bin/python3',
     'python3',
     'python',
@@ -37,14 +33,24 @@ function getPython() {
 }
 
 function startFlask() {
-  const python = getPython();
-  const script = path.join(PROJECT_ROOT, 'web_server.py');
+  let bin, args, cwd;
 
-  console.log('[electron] python:', python);
-  console.log('[electron] script:', script);
+  if (IS_PACKED) {
+    // Packaged app: use the bundled PyInstaller binary
+    bin  = path.join(process.resourcesPath, 'server', 'DraftAdvisorServer');
+    args = [];
+    cwd  = process.resourcesPath;
+    console.log('[electron] using bundled server:', bin);
+  } else {
+    // Dev mode: spawn via venv Python
+    bin  = getPython();
+    args = [path.join(PROJECT_ROOT, 'web_server.py')];
+    cwd  = PROJECT_ROOT;
+    console.log('[electron] python:', bin);
+  }
 
-  flaskProc = spawn(python, [script], {
-    cwd: PROJECT_ROOT,
+  flaskProc = spawn(bin, args, {
+    cwd,
     env: { ...process.env, PYTHONUNBUFFERED: '1' },
   });
 
