@@ -76,7 +76,10 @@ class DraftAdvisor {
             twisted_fate:'TwistedFate', kog_maw:'KogMaw', xin_zhao:'XinZhao',
             dr_mundo:'DrMundo', tahm_kench:'TahmKench', nunu:'Nunu',
         };
-        return ex[champId] || champId.split('_').map(p => p[0].toUpperCase() + p.slice(1)).join('');
+        if (ex[champId]) return ex[champId];
+        // New champs stored as original DDragon PascalCase — pass through directly
+        if (champId && champId[0] === champId[0].toUpperCase()) return champId;
+        return champId.split('_').map(p => p[0].toUpperCase() + p.slice(1)).join('');
     }
 
     champImg(champId) {
@@ -445,9 +448,8 @@ class DraftAdvisor {
             return;  // setRole calls fetchRecs; state will re-apply on next message
         }
 
-        // Apply ally picks (skip the user's own slot)
+        // Apply ally picks (including the user's own slot so their pick shows)
         for (const [role, champId] of Object.entries(state.allies || {})) {
-            if (role === this.role) continue;
             const current = this.draft.allies[role];
             if (champId && current !== champId) {
                 this.draft.allies[role] = champId;
@@ -465,21 +467,48 @@ class DraftAdvisor {
         }
 
         // Apply enemy picks
-        for (const [role, champId] of Object.entries(state.enemies || {})) {
-            const current = this.draft.enemies[role];
-            if (champId && current !== champId) {
-                this.draft.enemies[role] = champId;
-                const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
-                if (row) this.refreshRosterRow(row, 'enemy', role, champId);
-                this.updateLockCount('enemy');
-                changed = true;
-            } else if (!champId && current) {
-                this.draft.enemies[role] = null;
-                const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
-                if (row) this.refreshRosterRow(row, 'enemy', role, null);
-                this.updateLockCount('enemy');
-                changed = true;
+        const applyEnemies = (enemies) => {
+            for (const [role, champId] of Object.entries(enemies || {})) {
+                const current = this.draft.enemies[role];
+                if (champId && current !== champId) {
+                    this.draft.enemies[role] = champId;
+                    const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
+                    if (row) this.refreshRosterRow(row, 'enemy', role, champId);
+                    this.updateLockCount('enemy');
+                    changed = true;
+                } else if (!champId && current) {
+                    this.draft.enemies[role] = null;
+                    const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
+                    if (row) this.refreshRosterRow(row, 'enemy', role, null);
+                    this.updateLockCount('enemy');
+                    changed = true;
+                }
             }
+        };
+
+        const enemyChamps = Object.values(state.enemies || {}).filter(Boolean);
+        if (!state.enemy_roles_real && enemyChamps.length > 0) {
+            // Enemy positions unknown — infer from Lolalytics primary lane data
+            fetch('/api/infer_roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ champions: enemyChamps }),
+            })
+            .then(r => r.json())
+            .then(inferred => {
+                // Rebuild enemies dict with inferred roles
+                const reKeyed = {};
+                for (const [role, champId] of Object.entries(state.enemies || {})) {
+                    if (!champId) continue;
+                    const betterRole = inferred[champId] || role;
+                    reKeyed[betterRole] = champId;
+                }
+                applyEnemies(reKeyed);
+                if (changed) this.fetchRecs();
+            })
+            .catch(() => applyEnemies(state.enemies));
+        } else {
+            applyEnemies(state.enemies);
         }
 
         // Apply bans
@@ -505,7 +534,9 @@ class DraftAdvisor {
         applyBans(state.ally_bans  || [], 'ally');
         applyBans(state.enemy_bans || [], 'enemy');
 
-        if (changed) this.fetchRecs();
+        // If infer_roles is in flight it will call fetchRecs itself; otherwise call here
+        const inferInFlight = !state.enemy_roles_real && enemyChamps.length > 0;
+        if (changed && !inferInFlight) this.fetchRecs();
     }
 
     _setLCUIndicator(connected) {
@@ -526,6 +557,11 @@ class DraftAdvisor {
     // ── Recommendations ───────────────────────────────────────
 
     async fetchRecs() {
+        // Cancel any in-flight request so a stale role/state can't overwrite newer results
+        if (this._fetchRecsAbort) this._fetchRecsAbort.abort();
+        this._fetchRecsAbort = new AbortController();
+        const { signal } = this._fetchRecsAbort;
+
         this.showState('loading');
         try {
             const body = {
@@ -539,11 +575,13 @@ class DraftAdvisor {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
+                signal,
             })).json();
             if (data.error) throw new Error(data.error);
             this.lastRecs = data;
             this.renderCenter(data);
         } catch (e) {
+            if (e.name === 'AbortError') return;  // superseded by a newer request
             this.showState('empty');
             console.error(e);
         }

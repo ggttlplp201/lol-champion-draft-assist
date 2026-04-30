@@ -26,16 +26,24 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 log = logging.getLogger(__name__)
 
-# LCU position string → our Role string
+# LCU position string → our role key (must match frontend ROLES array and backend ROLE_MAP)
 _POS = {
     'top':     'top',
     'jungle':  'jungle',
-    'middle':  'middle',
+    'middle':  'mid',
     'bottom':  'bottom',
-    'utility': 'utility',
-    'support': 'utility',
+    'utility': 'support',
+    'support': 'support',
     '':        None,
 }
+
+# cellId maps to role: 0-4 = blue side, 5-9 = red side (same order)
+_CELL_POS = {
+    0: 'top', 1: 'jungle', 2: 'mid', 3: 'bottom', 4: 'support',
+    5: 'top', 6: 'jungle', 7: 'mid', 8: 'bottom', 9: 'support',
+}
+
+_SMITE_IDS = {11, 12}   # 11 = Smite, 12 = Smite (alternate slot)
 
 _PROC_NAMES = {'LeagueClientUx', 'LeagueClientUx.exe'}
 
@@ -99,8 +107,11 @@ class LCUConnector:
                 timeout=2,
             )
             if r.status_code == 200:
-                return self._parse(r.json())
+                raw = r.json()
+                self._last_raw = raw   # store for /api/lcu/raw
+                return self._parse(raw)
             if r.status_code == 404:
+                self._last_raw = None
                 return None   # not in champ select
         except requests.RequestException:
             self.reset()
@@ -114,6 +125,18 @@ class LCUConnector:
             return None
         return self._key_map.get(int(numeric_id))
 
+    def _role_for(self, p: dict) -> Optional[str]:
+        """Resolve a player's role: assignedPosition → smite → cellId fallback."""
+        role = _POS.get(p.get('assignedPosition', '').lower())
+        if role:
+            return role
+        # Custom games often have no assignedPosition — detect jungle via smite
+        spells = {p.get('spell1Id'), p.get('spell2Id')}
+        if spells & _SMITE_IDS:
+            return 'jungle'
+        # Last resort: use cell order (reliable in organised lobbies)
+        return _CELL_POS.get(p.get('cellId', -1))
+
     def _parse(self, data: dict) -> dict:
         local_cell = data.get('localPlayerCellId', -1)
         my_team    = data.get('myTeam', [])
@@ -121,45 +144,71 @@ class LCUConnector:
         timer      = data.get('timer', {})
         phase      = timer.get('phase', 'PLANNING')
 
-        # Determine the local player's assigned role
+        my_cell_ids = {p.get('cellId') for p in my_team}
+
+        # Local player's role
         my_role = None
         for p in my_team:
             if p.get('cellId') == local_cell:
-                my_role = _POS.get(p.get('assignedPosition', '').lower())
+                my_role = self._role_for(p)
                 break
 
         # Ally picks — keyed by role
         allies: dict = {}
         for p in my_team:
-            role = _POS.get(p.get('assignedPosition', '').lower())
+            role = self._role_for(p)
             if role:
                 champ = self._cid(p.get('championId', 0))
-                # During pick phase, championPickIntent shows hover before lock
                 if not champ:
                     champ = self._cid(p.get('championPickIntent', 0))
-                allies[role] = champ   # None until picked/hovered
+                allies[role] = champ
 
         # Enemy picks — keyed by role
         enemies: dict = {}
         for p in their_team:
-            role = _POS.get(p.get('assignedPosition', '').lower())
+            role = self._role_for(p)
             if role:
                 champ = self._cid(p.get('championId', 0))
                 enemies[role] = champ
 
-        # Bans
-        bans_raw = data.get('bans', {})
-        ally_bans  = [self._cid(c) for c in bans_raw.get('myTeamBans',    []) if c]
-        enemy_bans = [self._cid(c) for c in bans_raw.get('theirTeamBans', []) if c]
+        # Bans: prefer bans.myTeamBans/theirTeamBans; fall back to completed ban actions
+        bans_raw   = data.get('bans', {})
+        ally_raw   = [c for c in bans_raw.get('myTeamBans',    []) if c]
+        enemy_raw  = [c for c in bans_raw.get('theirTeamBans', []) if c]
+
+        if not ally_raw and not enemy_raw:
+            for group in data.get('actions', []):
+                for action in (group if isinstance(group, list) else []):
+                    if action.get('type') != 'ban' or not action.get('completed'):
+                        continue
+                    cid = action.get('championId', 0)
+                    if not cid:
+                        continue
+                    if action.get('actorCellId') in my_cell_ids:
+                        ally_raw.append(cid)
+                    else:
+                        enemy_raw.append(cid)
+
+        ally_bans  = [c for c in (self._cid(c) for c in ally_raw)  if c]
+        enemy_bans = [c for c in (self._cid(c) for c in enemy_raw) if c]
+
+        log.debug('parsed: my_role=%s allies=%s enemies=%s ally_bans=%s enemy_bans=%s',
+                  my_role, list(allies.keys()), list(enemies.keys()), ally_bans, enemy_bans)
+
+        # Flag whether enemy positions are real (from LCU) or inferred (cellId fallback)
+        enemy_roles_real = any(
+            p.get('assignedPosition', '') for p in their_team
+        )
 
         return {
-            'active':      True,
-            'phase':       phase,
-            'my_role':     my_role,
-            'allies':      allies,
-            'enemies':     enemies,
-            'ally_bans':   ally_bans,
-            'enemy_bans':  enemy_bans,
+            'active':           True,
+            'phase':            phase,
+            'my_role':          my_role,
+            'allies':           allies,
+            'enemies':          enemies,
+            'ally_bans':        ally_bans,
+            'enemy_bans':       enemy_bans,
+            'enemy_roles_real': enemy_roles_real,
         }
 
 

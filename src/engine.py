@@ -156,13 +156,17 @@ class StandardSuggestionEngine(SuggestionEngine):
         Note: Assumes Champion.id matches ChampionStats.champion_id format exactly.
         For production, ensure consistent ID format (Riot champion key) across all data sources.
         """
-        banned_ids = {champ.id for champ in draft_state.banned_champions}
+        unavailable = (
+            {champ.id for champ in draft_state.banned_champions} |
+            {champ.id for champ in draft_state.ally_champions} |
+            {champ.id for champ in draft_state.enemy_champions}
+        )
         seen = set()  # Deduplicate champions by ID
-        
+
         available = []
         for stats in champion_stats:
-            # Skip banned champions and duplicates
-            if stats.champion_id in banned_ids or stats.champion_id in seen:
+            # Skip picked/banned champions and duplicates
+            if stats.champion_id in unavailable or stats.champion_id in seen:
                 continue
             
             seen.add(stats.champion_id)

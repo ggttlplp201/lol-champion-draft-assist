@@ -107,12 +107,14 @@ def _team_curve(champion_ids: list) -> list:
 
 
 ROLE_MAP = {
-    'top': Role.TOP,
-    'jungle': Role.JUNGLE,
-    'mid': Role.MIDDLE,
-    'bottom': Role.BOTTOM,
-    'adc': Role.BOTTOM,
+    'top':     Role.TOP,
+    'jungle':  Role.JUNGLE,
+    'mid':     Role.MIDDLE,
+    'middle':  Role.MIDDLE,
+    'bottom':  Role.BOTTOM,
+    'adc':     Role.BOTTOM,
     'support': Role.UTILITY,
+    'utility': Role.UTILITY,
 }
 
 CHAMPION_DATA = {
@@ -484,12 +486,30 @@ scorer = StandardScorer()
 engine = StandardSuggestionEngine(data_manager, scorer)
 
 # ── LCU live overlay ──────────────────────────────────────────────────────
-# Build numeric-key → champion_id map from the DDragon-enriched data
+# Build numeric-key → champion_id map. Start from CHAMPION_DATA (has correct
+# internal IDs for all known champs), then add any missing entries from DDragon
+# so newly released champions (not yet in CHAMPION_DATA) are still resolved.
 _champ_key_map: dict = {
     int(info['key']): cid
     for cid, info in CHAMPION_DATA.items()
     if info.get('key', '').isdigit()
 }
+try:
+    _dd_versions = _requests.get(
+        'https://ddragon.leagueoflegends.com/api/versions.json', timeout=5
+    ).json()
+    _dd_champs = _requests.get(
+        f'https://ddragon.leagueoflegends.com/cdn/{_dd_versions[0]}/data/en_US/champion.json',
+        timeout=10,
+    ).json()
+    for _e in _dd_champs['data'].values():
+        if not _e.get('key', '').isdigit():
+            continue
+        _k = int(_e['key'])
+        if _k not in _champ_key_map:          # only add truly new champions
+            _champ_key_map[_k] = _e['id']    # keep original PascalCase so portrait URLs work
+except Exception:
+    pass
 
 try:
     from ..lcu.connector import LCUService
@@ -530,6 +550,60 @@ def get_recommendations():
 @app.route('/api/champions')
 def get_champions():
     return jsonify(CHAMPION_DATA)
+
+
+@app.route('/api/infer_roles', methods=['POST'])
+def infer_roles():
+    """Given a list of champion IDs (no positions known), return best-guess role assignments."""
+    champ_ids = request.get_json(force=True).get('champions', [])
+    if not champ_ids:
+        return jsonify({})
+    result = asyncio.run(_infer_roles_async(champ_ids))
+    return jsonify(result)
+
+
+async def _infer_roles_async(champ_ids: list) -> dict:
+    all_roles = [Role.TOP, Role.JUNGLE, Role.MIDDLE, Role.BOTTOM, Role.UTILITY]
+    role_key_map = {Role.TOP: 'top', Role.JUNGLE: 'jungle', Role.MIDDLE: 'mid',
+                    Role.BOTTOM: 'bottom', Role.UTILITY: 'support'}
+
+    # Fetch stats for all roles in parallel (most will be cache hits)
+    stats_per_role = await asyncio.gather(
+        *[data_manager.fetch_champion_stats(_current_patch, r) for r in all_roles],
+        return_exceptions=True,
+    )
+
+    # Build {champ_id: {role_key: pick_rate}} affinity table
+    affinity: dict = {}
+    for role, stats in zip(all_roles, stats_per_role):
+        if not isinstance(stats, list):
+            continue
+        rk = role_key_map[role]
+        for s in stats:
+            if s.champion_id in champ_ids:
+                affinity.setdefault(s.champion_id, {})[rk] = s.pick_rate
+
+    # Greedy assignment: highest pick_rate wins, no role double-booked
+    ROLE_KEYS = ['top', 'jungle', 'mid', 'bottom', 'support']
+    candidates = sorted(
+        [(pr, cid, rk) for cid, roles in affinity.items() for rk, pr in roles.items()],
+        reverse=True,
+    )
+    assigned_champs, taken_roles, assignment = set(), set(), {}
+    for pr, cid, rk in candidates:
+        if cid in assigned_champs or rk in taken_roles:
+            continue
+        assignment[cid] = rk
+        assigned_champs.add(cid)
+        taken_roles.add(rk)
+
+    # Any champion with no Lolalytics data gets a leftover role by order
+    remaining = [r for r in ROLE_KEYS if r not in taken_roles]
+    for cid in champ_ids:
+        if cid not in assignment and remaining:
+            assignment[cid] = remaining.pop(0)
+
+    return assignment
 
 
 @app.route('/api/champion_detail', methods=['POST'])
@@ -656,6 +730,31 @@ def _fmt(rec):
         },
         'explanations': rec.explanations,
     }
+
+
+@app.route('/api/lcu/raw')
+def lcu_raw():
+    """Return the raw LCU session JSON — for debugging only."""
+    if _lcu is None:
+        return jsonify({'error': 'LCU service not running'})
+    raw = getattr(_lcu._connector, '_last_raw', None)
+    if raw is None:
+        return jsonify({'error': 'no raw data (not in champ select or not connected)'})
+    # Return just the useful parts to avoid huge response
+    return jsonify({
+        'localPlayerCellId': raw.get('localPlayerCellId'),
+        'myTeam': [
+            {k: p.get(k) for k in ('cellId', 'assignedPosition', 'championId', 'championPickIntent', 'spell1Id', 'spell2Id')}
+            for p in raw.get('myTeam', [])
+        ],
+        'theirTeam': [
+            {k: p.get(k) for k in ('cellId', 'assignedPosition', 'championId', 'championPickIntent')}
+            for p in raw.get('theirTeam', [])
+        ],
+        'bans': raw.get('bans', {}),
+        'actions': raw.get('actions', []),
+        'timer': raw.get('timer', {}),
+    })
 
 
 @app.route('/api/lcu/status')
