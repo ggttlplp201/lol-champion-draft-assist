@@ -53,9 +53,9 @@ League client (LCU API)
   • streams state changes to browser via SSE               │
   • fetches champion stats + counters from Lolalytics      │
   • fetches build + rune + game-length WR from Lolalytics  │
-        │                                                   │
-        ▼                                                   │
-  Browser UI  ◄──────────────────────────────────────────── SSE
+        │                                                  │
+        ▼                                                  │
+  Browser UI  ◄───────────────────────────────────────── SSE
   • renders recommendations, counters, build, runes
   • power spike chart (real win-rate-by-game-length data)
         │
