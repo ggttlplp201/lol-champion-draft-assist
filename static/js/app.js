@@ -511,15 +511,17 @@ class DraftAdvisor {
             applyEnemies(state.enemies);
         }
 
-        // Apply bans
+        // Apply bans — update both the draft state arrays and the DOM
         const applyBans = (incoming, side) => {
-            const el = document.getElementById(`${side}-bans`);
+            const arr = side === 'ally' ? this.draft.allyBans : this.draft.enemyBans;
+            const el  = document.getElementById(`${side}-bans`);
             if (!el) return;
             const slots = el.querySelectorAll('.d2-ban-slot');
             incoming.forEach((champId, i) => {
                 if (!slots[i]) return;
-                const current = slots[i].dataset.champId;
+                const current = arr[i];
                 if (champId && current !== champId) {
+                    arr[i] = champId;
                     slots[i].dataset.champId = champId;
                     const name = this.champions[champId]?.name || champId;
                     slots[i].classList.add('filled');
@@ -527,6 +529,9 @@ class DraftAdvisor {
                     slots[i].innerHTML = `<img src="${this.champImg(champId)}"
                         style="width:100%;height:100%;object-fit:cover;border-radius:3px;opacity:0.6"
                         onerror="this.style.display='none'" alt="${name}">`;
+                    changed = true;
+                } else if (!champId && current) {
+                    arr[i] = null;
                     changed = true;
                 }
             });
