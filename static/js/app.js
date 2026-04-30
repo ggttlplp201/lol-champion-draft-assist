@@ -42,7 +42,6 @@ class DraftAdvisor {
         this.bindEvents();
         this.updateHeaderRole();
         this.updatePicksProgress();
-        this.startTimer();
         this.fetchRecs();
         this.connectLCU();
     }
@@ -306,11 +305,8 @@ class DraftAdvisor {
     updatePicksProgress() {
         const a = Object.values(this.draft.allies).filter(Boolean).length;
         const e = Object.values(this.draft.enemies).filter(Boolean).length;
-        const t = a + e;
-        document.getElementById('picks-count').textContent = t;
-        document.getElementById('picks-fill').style.width  = `${(t / 10) * 100}%`;
-        document.getElementById('ally-lock-count').textContent   = `${a} / 5 LOCKED`;
-        document.getElementById('enemy-lock-count').textContent  = `${e} / 5 LOCKED`;
+        document.getElementById('ally-lock-count').textContent  = `${a} / 5 LOCKED`;
+        document.getElementById('enemy-lock-count').textContent = `${e} / 5 LOCKED`;
     }
 
     // ── Modal ─────────────────────────────────────────────────
@@ -445,7 +441,7 @@ class DraftAdvisor {
         // Auto-set role from LCU if the user hasn't manually changed it
         if (state.my_role && state.my_role !== this.role && !this._roleOverridden) {
             this.setRole(state.my_role);
-            return;  // setRole calls fetchRecs; state will re-apply on next message
+            // Don't return — continue applying picks/bans from this same state message
         }
 
         // Apply ally picks (including the user's own slot so their pick shows)
@@ -488,7 +484,10 @@ class DraftAdvisor {
 
         const enemyChamps = Object.values(state.enemies || {}).filter(Boolean);
         if (!state.enemy_roles_real && enemyChamps.length > 0) {
-            // Enemy positions unknown — infer from Lolalytics primary lane data
+            // Enemy positions unknown — infer from Lolalytics primary lane data.
+            // Generation counter prevents stale responses from overwriting newer ones.
+            this._inferGen = (this._inferGen || 0) + 1;
+            const myGen = this._inferGen;
             fetch('/api/infer_roles', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -496,6 +495,7 @@ class DraftAdvisor {
             })
             .then(r => r.json())
             .then(inferred => {
+                if (myGen !== this._inferGen) return; // superseded by a newer call
                 // Rebuild enemies dict with inferred roles
                 const reKeyed = {};
                 for (const [role, champId] of Object.entries(state.enemies || {})) {
@@ -503,10 +503,23 @@ class DraftAdvisor {
                     const betterRole = inferred[champId] || role;
                     reKeyed[betterRole] = champId;
                 }
+                // Clear any slots that are no longer in the new assignment
+                for (const role of ROLES) {
+                    if (this.draft.enemies[role] && !reKeyed[role]) {
+                        this.draft.enemies[role] = null;
+                        const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
+                        if (row) this.refreshRosterRow(row, 'enemy', role, null);
+                        this.updateLockCount('enemy');
+                        changed = true;
+                    }
+                }
                 applyEnemies(reKeyed);
                 if (changed) this.fetchRecs();
             })
-            .catch(() => applyEnemies(state.enemies));
+            .catch(() => {
+                applyEnemies(state.enemies);
+                if (changed) this.fetchRecs();
+            });
         } else {
             applyEnemies(state.enemies);
         }
@@ -552,6 +565,10 @@ class DraftAdvisor {
             dot.style.background  = 'var(--green)';
             label.textContent = 'LIVE';
             label.style.color = 'var(--green)';
+            if (!this._timerStarted) {
+                this._timerStarted = true;
+                this.startTimer();
+            }
         } else {
             dot.style.background  = '#4a5168';
             label.textContent = 'OFFLINE';
@@ -607,9 +624,8 @@ class DraftAdvisor {
 
     showDetailFor(rec, activeIdx) {
         this.renderHeroCard(rec);
-        this.renderWhy(rec);
 
-        // Fetch detail from backend (power spike + counters + build/runes)
+        // Fetch detail from backend (power spike + matchup tables + build/runes)
         const allies  = Object.values(this.draft.allies).filter(Boolean);
         const enemies = Object.values(this.draft.enemies).filter(Boolean);
         fetch('/api/champion_detail', {
@@ -620,12 +636,14 @@ class DraftAdvisor {
         .then(r => r.json())
         .then(detail => {
             this.renderPowerSpike(rec, detail.power_curve);
-            this.renderCounters(rec, detail.counters || []);
+            this.renderStrongAgainst(rec, detail.strong_against || []);
+            this.renderWeakAgainst(rec, detail.counters || []);
             this.renderBuildRunes(rec, detail.build || [], detail.runes || {});
         })
         .catch(() => {
             this.renderPowerSpike(rec, null);
-            this.renderCounters(rec, []);
+            this.renderStrongAgainst(rec, []);
+            this.renderWeakAgainst(rec, []);
             this.renderBuildRunes(rec, [], {});
         });
 
@@ -718,11 +736,11 @@ class DraftAdvisor {
         const stages = ['Lane', 'Lvl 6', 'Mid', 'Late', 'Full'];
         const lvls   = ['<20m', '~22m', '~28m', '~37m', '45m+'];
 
-        // Find peak advantage stage
+        // Win window = where the champion's own win rate peaks (absolute best stage)
+        const peak = ally.indexOf(Math.max(...ally));
         const advantage = ally.map((v, i) => v - enemy[i]);
-        const peak = advantage.indexOf(Math.max(...advantage));
-        const peakAdv = Math.round(Math.max(...advantage) * 10) / 10;
-        const stageLabels = ['FORCE EARLY', 'FIGHT AT LVL 6', 'FORCE FIGHTS AT LVL 11', 'TAKE LATE FIGHTS', 'SCALE TO FULL BUILD'];
+        const peakAdv = Math.round(advantage[peak] * 10) / 10;
+        const stageLabels = ['FORCE EARLY FIGHTS', 'FIGHT AT LVL 6', 'FIGHT IN MID GAME', 'PLAY FOR LATE GAME', 'SCALE TO FULL BUILD'];
         const calloutLabel = stageLabels[peak];
 
         // Auto-scale Y-axis to the actual win rate range
@@ -828,54 +846,63 @@ class DraftAdvisor {
         </div>`;
     }
 
-    // ── Why panel ─────────────────────────────────────────────
+    // ── Strong Against panel (blue) ───────────────────────────
 
-    renderWhy(rec) {
-        const el  = document.getElementById('why-panel');
-        const exs = rec.explanations || [];
-
-        const items = (exs.length ? exs.slice(0, 4) : ['Strong meta pick recommended for the current draft.']).map(txt => {
-            const lower = txt.toLowerCase();
-            let type = 'comp', badge = 'COMP';
-            if (lower.includes('counter') || lower.includes('beats') || lower.includes('vs ') || lower.includes('advantage'))
-                { type = 'counter'; badge = 'COUNTERS'; }
-            else if (lower.includes('synergy') || lower.includes('combo') || lower.includes('pair') || lower.includes('with '))
-                { type = 'synergy'; badge = 'SYNERGY'; }
-            else if (lower.includes('meta') || lower.includes('patch') || lower.includes('tier') || lower.includes('win rate'))
-                { type = 'meta'; badge = 'META'; }
-            // Split at first sentence-ending punctuation after 25 chars
-            const split = txt.search(/[.,:—]/);
-            let main = txt, sub = '';
-            if (split > 25 && split < txt.length - 4) {
-                main = txt.slice(0, split);
-                sub  = txt.slice(split + 1).trim();
-            }
-            return `<div class="d2-why-item">
-                <div class="d2-why-badge badge-${type}">${badge}</div>
-                <div class="d2-why-body">
-                    <div class="d2-why-main">${main}</div>
-                    ${sub ? `<div class="d2-why-sub">${sub}</div>` : ''}
+    renderStrongAgainst(rec, matchups) {
+        const el = document.getElementById('why-panel');
+        if (!matchups.length) {
+            el.innerHTML = `<div class="d2-counters-panel">
+                <div class="d2-counters-head">
+                    <svg width="13" height="13" viewBox="0 0 16 16">
+                        <path d="M8 14l-7-7 2-2 5 5 7-7 2 2z" fill="var(--ally)"/>
+                    </svg>
+                    <span class="d2-counters-title" style="color:var(--ally)">STRONG AGAINST</span>
+                    <span class="d2-counters-sub">no lane matchup data</span>
                 </div>
             </div>`;
-        });
+            return;
+        }
+        const rows = matchups.map(c => {
+            const pct = c.advantage === 'high' ? 78 : 50;
+            return `<div class="d2-counter-row">
+                ${this.portrait(c.champion_id, 32)}
+                <div>
+                    <div class="d2-counter-name">${c.champion_name}</div>
+                    <div class="d2-counter-note">${c.win_rate}% WR vs them</div>
+                </div>
+                <div class="d2-risk-bar">
+                    <div class="d2-risk-track"><div class="d2-risk-fill" style="width:${pct}%;background:var(--ally)"></div></div>
+                    <div class="d2-risk-label" style="color:var(--ally)">${c.advantage.toUpperCase()} ADV</div>
+                </div>
+            </div>`;
+        }).join('');
 
-        el.innerHTML = `<div class="d2-why-panel">
-            <div class="d2-panel-heading">WHY ${rec.championName.toUpperCase()}</div>
-            <div class="d2-why-list">${items.join('')}</div>
+        el.innerHTML = `<div class="d2-counters-panel">
+            <div class="d2-counters-head">
+                <svg width="13" height="13" viewBox="0 0 16 16">
+                    <path d="M8 14l-7-7 2-2 5 5 7-7 2 2z" fill="var(--ally)"/>
+                </svg>
+                <span class="d2-counters-title" style="color:var(--ally)">STRONG AGAINST</span>
+                <span class="d2-counters-sub">${matchups.length} favorable matchup${matchups.length !== 1 ? 's' : ''}</span>
+            </div>
+            ${rows}
         </div>`;
     }
 
-    // ── Counters panel ────────────────────────────────────────
+    // ── Weak Against panel (red) ──────────────────────────────
 
-    renderCounters(rec, counters) {
+    renderWeakAgainst(rec, counters) {
         const el = document.getElementById('counters-panel');
         if (!counters.length) {
-            el.innerHTML = `<div class="d2-breakdown-panel">
-                <div class="d2-panel-heading">SCORE BREAKDOWN</div>
-                ${this.barHtml('Meta',    rec.scoreBreakdown.metaScore,    'meta')}
-                ${this.barHtml('Synergy', rec.scoreBreakdown.synergyScore, 'synergy')}
-                ${this.barHtml('Counter', rec.scoreBreakdown.counterScore, 'counter')}
-                ${this.barHtml('Stats',   Math.min(100, ((rec.winRate-45)/15)*100), 'meta')}
+            el.innerHTML = `<div class="d2-counters-panel">
+                <div class="d2-counters-head">
+                    <svg width="13" height="13" viewBox="0 0 16 16">
+                        <path d="M8 1L15 14H1L8 1z" fill="var(--enemy)"/>
+                        <path d="M8 6v4M8 12v0.5" stroke="#0b0e15" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                    <span class="d2-counters-title">WEAK AGAINST</span>
+                    <span class="d2-counters-sub">no threats found</span>
+                </div>
             </div>`;
             return;
         }
@@ -901,7 +928,7 @@ class DraftAdvisor {
                     <path d="M8 1L15 14H1L8 1z" fill="var(--enemy)"/>
                     <path d="M8 6v4M8 12v0.5" stroke="#0b0e15" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
-                <span class="d2-counters-title">STILL CAN COUNTER YOU</span>
+                <span class="d2-counters-title">WEAK AGAINST</span>
                 <span class="d2-counters-sub">${counters.length} threat${counters.length !== 1 ? 's' : ''} from data</span>
             </div>
             ${rows}

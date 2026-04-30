@@ -657,19 +657,54 @@ async def _champion_detail_async(champ_id: str, role: Role, allies: list, enemie
             'n':   raw_runes.get('n', 0),
         }
 
-    # Counter picks (champions that beat champ_id in this role)
+    # Counter picks — filter to actual enemies in the draft where possible
     counter_data = await data_manager.fetch_counter_data(_current_patch, role)
+    enemy_set = set(enemies)
     counters = []
+    strong_against = []
     for cd in counter_data:
-        if cd.champion_a == champ_id and cd.win_rate_b > 0.51:
+        if cd.champion_a != champ_id:
+            continue
+        # Only show matchups against actual draft enemies (if any are known)
+        if enemy_set and cd.champion_b not in enemy_set:
+            continue
+        name = CHAMPION_DATA.get(cd.champion_b, {}).get('name', cd.champion_b)
+        if cd.win_rate_b > 0.51:   # enemy beats us
             counters.append({
                 'champion_id':   cd.champion_b,
-                'champion_name': CHAMPION_DATA.get(cd.champion_b, {}).get('name', cd.champion_b),
+                'champion_name': name,
                 'win_rate':      round(cd.win_rate_b * 100, 1),
                 'risk':          'high' if cd.win_rate_b > 0.55 else 'mid',
             })
+        elif cd.win_rate_a > 0.52:   # we beat them
+            strong_against.append({
+                'champion_id':   cd.champion_b,
+                'champion_name': name,
+                'win_rate':      round(cd.win_rate_a * 100, 1),
+                'advantage':     'high' if cd.win_rate_a > 0.55 else 'mid',
+            })
+    # Fallback: if no enemy overlap, show top all-time matchups unfiltered
+    if not counters and not strong_against:
+        for cd in counter_data:
+            if cd.champion_a != champ_id:
+                continue
+            name = CHAMPION_DATA.get(cd.champion_b, {}).get('name', cd.champion_b)
+            if cd.win_rate_b > 0.51:
+                counters.append({
+                    'champion_id': cd.champion_b, 'champion_name': name,
+                    'win_rate': round(cd.win_rate_b * 100, 1),
+                    'risk': 'high' if cd.win_rate_b > 0.55 else 'mid',
+                })
+            elif cd.win_rate_a > 0.52:
+                strong_against.append({
+                    'champion_id': cd.champion_b, 'champion_name': name,
+                    'win_rate': round(cd.win_rate_a * 100, 1),
+                    'advantage': 'high' if cd.win_rate_a > 0.55 else 'mid',
+                })
     counters.sort(key=lambda x: -x['win_rate'])
+    strong_against.sort(key=lambda x: -x['win_rate'])
     counters = counters[:5]
+    strong_against = strong_against[:5]
 
     # Power spike curve — use real Lolalytics win-rate-by-game-length if available,
     # fall back to tag-based heuristic for the recommended champion.
@@ -697,10 +732,11 @@ async def _champion_detail_async(champ_id: str, role: Role, allies: list, enemie
         enemy_curve = _team_curve(enemies) if enemies else [55, 65, 66, 64, 60]
 
     return {
-        'build':        build,
-        'runes':        runes,
-        'counters':     counters,
-        'power_curve':  {'ally': ally_curve, 'enemy': enemy_curve},
+        'build':          build,
+        'runes':          runes,
+        'counters':       counters,
+        'strong_against': strong_against,
+        'power_curve':    {'ally': ally_curve, 'enemy': enemy_curve},
         'game_length_wr': raw_gl,
     }
 
