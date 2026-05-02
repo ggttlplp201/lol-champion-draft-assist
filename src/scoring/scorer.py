@@ -90,7 +90,7 @@ class StandardScorer(ChampionScorer):
                 score = self._normalize_to_scale(synergy.synergy_delta, -0.2, 0.2, 0, 100)
                 synergy_scores.append(score)
             else:
-                synergy_scores.append(self._hash_pair_score(champion.id, ally.id, 'syn'))
+                synergy_scores.append(50.0)  # No data — neutral, not fabricated
 
         return sum(synergy_scores) / len(synergy_scores)
     
@@ -119,7 +119,7 @@ class StandardScorer(ChampionScorer):
                     score = self._normalize_to_scale(counter.win_rate_a, 0.3, 0.7, 0, 100)
                 counter_scores.append(score)
             else:
-                counter_scores.append(self._hash_pair_score(champion.id, enemy.id, 'ctr'))
+                counter_scores.append(50.0)  # No matchup data — neutral, not fabricated
 
         return sum(counter_scores) / len(counter_scores)
     

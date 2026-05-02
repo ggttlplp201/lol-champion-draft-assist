@@ -20,9 +20,11 @@ _ITEM_NAMES: dict = {}   # {item_id_int: name_str}
 _RUNE_NAMES: dict = {}   # {rune_id_int: name_str}
 
 
-def _enrich_champion_data_with_keys(champion_data: dict) -> str:
-    """Fetch DDragon to add numeric 'key' + 'tags' to each entry; returns short patch."""
+def _enrich_champion_data_with_keys(champion_data: dict) -> tuple:
+    """Fetch DDragon to add 'key'+'tags' to each entry.
+    Returns (short_patch, dd_key_map) where dd_key_map is {int_key: id_str} for all champions."""
     global _ITEM_NAMES, _RUNE_NAMES
+    dd_key_map: dict = {}
     try:
         versions = _requests.get(
             'https://ddragon.leagueoflegends.com/api/versions.json', timeout=5
@@ -34,6 +36,8 @@ def _enrich_champion_data_with_keys(champion_data: dict) -> str:
             timeout=10,
         ).json()
         for entry in champ_json['data'].values():
+            if entry.get('key', '').isdigit():
+                dd_key_map[int(entry['key'])] = entry['id']
             name = entry['name']
             for cid, info in champion_data.items():
                 if info['name'] == name:
@@ -66,10 +70,10 @@ def _enrich_champion_data_with_keys(champion_data: dict) -> str:
             pass
 
         parts = patch.split('.')
-        return f"{parts[0]}.{parts[1]}"
+        return f"{parts[0]}.{parts[1]}", dd_key_map
     except Exception as e:
         print(f'DDragon enrichment failed: {e}')
-        return '16.9'
+        return '16.9', {}
 
 
 # Power-curve heuristic from DDragon champion tags
@@ -479,7 +483,7 @@ app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 app.secret_key = 'draft_advisor_secret_key'
 
 _mock = MockDataManager()
-_current_patch = _enrich_champion_data_with_keys(CHAMPION_DATA)
+_current_patch, _dd_key_map = _enrich_champion_data_with_keys(CHAMPION_DATA)
 try:
     from ..data.lolalytics_client import LolatyticsClient
     data_manager = LolatyticsClient(CHAMPION_DATA, _current_patch)
@@ -491,31 +495,14 @@ except Exception as e:
 scorer = StandardScorer()
 engine = StandardSuggestionEngine(data_manager, scorer)
 
-# ── LCU live overlay ──────────────────────────────────────────────────────
-# Build numeric-key → champion_id map. Start from CHAMPION_DATA (has correct
-# internal IDs for all known champs), then add any missing entries from DDragon
-# so newly released champions (not yet in CHAMPION_DATA) are still resolved.
-_champ_key_map: dict = {
-    int(info['key']): cid
-    for cid, info in CHAMPION_DATA.items()
-    if info.get('key', '').isdigit()
-}
-try:
-    _dd_versions = _requests.get(
-        'https://ddragon.leagueoflegends.com/api/versions.json', timeout=5
-    ).json()
-    _dd_champs = _requests.get(
-        f'https://ddragon.leagueoflegends.com/cdn/{_dd_versions[0]}/data/en_US/champion.json',
-        timeout=10,
-    ).json()
-    for _e in _dd_champs['data'].values():
-        if not _e.get('key', '').isdigit():
-            continue
-        _k = int(_e['key'])
-        if _k not in _champ_key_map:          # only add truly new champions
-            _champ_key_map[_k] = _e['id']    # keep original PascalCase so portrait URLs work
-except Exception:
-    pass
+# ── LCU champion key map ───────────────────────────────────────────────────
+# Start with DDragon's full map (PascalCase IDs for new/unknown champions),
+# then override with our internal IDs for known champions so role inference
+# and portrait URLs use the right keys.
+_champ_key_map: dict = dict(_dd_key_map)
+for _cid, _info in CHAMPION_DATA.items():
+    if _info.get('key', '').isdigit():
+        _champ_key_map[int(_info['key'])] = _cid
 
 try:
     from ..lcu.connector import LCUService
@@ -526,9 +513,11 @@ except Exception as _lcu_err:
     _lcu = None
 
 
+_IS_DEV = not getattr(_sys, 'frozen', False)
+
 @app.route('/')
 def index():
-    return render_template('index.html', champions=CHAMPION_DATA)
+    return render_template('index.html', champions=CHAMPION_DATA, is_dev=_IS_DEV)
 
 
 @app.route('/api/recommendations', methods=['POST'])
@@ -536,18 +525,52 @@ def get_recommendations():
     try:
         data = request.get_json()
         role = ROLE_MAP.get(data.get('role', 'mid'), Role.MIDDLE)
+        declared = data.get('declared')  # champion the player has declared / hovered
+
+        # Exclude the declared champion from allies so the engine can score it
+        allies = [a for a in data.get('allies', []) if a != declared]
+
         result = asyncio.run(_generate_recommendations_async(
-            data.get('allies', []),
+            allies,
             data.get('enemies', []),
             data.get('banned', []),
             _current_patch,
             data.get('championPool', []),
             role,
         ))
+
+        overall = [_fmt(r) for r in result.overall_recommendations]
+        pool    = [_fmt(r) for r in result.champion_pool_recommendations]
+
+        # Separate declared champion from the alternatives list.
+        # If the declared champion isn't in the scored list (e.g. off-meta / no Lolalytics data
+        # for this role), build a minimal fallback entry so the UI still switches to their pick.
+        declared_entry = None
+        if declared:
+            for i, r in enumerate(overall):
+                if r['championId'] == declared:
+                    declared_entry = r
+                    overall = overall[:i] + overall[i+1:]
+                    break
+            for i, r in enumerate(pool):
+                if r['championId'] == declared:
+                    pool = pool[:i] + pool[i+1:]
+                    break
+            if declared_entry is None:
+                info = CHAMPION_DATA.get(declared, {})
+                declared_entry = {
+                    'championId': declared,
+                    'championName': info.get('name', declared),
+                    'score': 0, 'winRate': 0, 'pickRate': 0, 'banRate': 0,
+                    'scoreBreakdown': {'metaScore': 0, 'synergyScore': 0, 'counterScore': 0, 'confidenceBonus': 0},
+                    'explanations': [],
+                }
+
         return jsonify({
-            'championPoolRecommendations': [_fmt(r) for r in result.champion_pool_recommendations],
-            'overallRecommendations': [_fmt(r) for r in result.overall_recommendations],
-            'timestamp': result.timestamp.isoformat(),
+            'championPoolRecommendations': pool,
+            'overallRecommendations':      overall,
+            'declaredChampion':            declared_entry,
+            'timestamp':                   result.timestamp.isoformat(),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -556,6 +579,22 @@ def get_recommendations():
 @app.route('/api/champions')
 def get_champions():
     return jsonify(CHAMPION_DATA)
+
+
+@app.route('/api/role_pools')
+def get_role_pools():
+    """Return champion IDs grouped by their primary role per Lolalytics defaultLane data."""
+    all_roles = [Role.TOP, Role.JUNGLE, Role.MIDDLE, Role.BOTTOM, Role.UTILITY]
+    role_keys  = ['top', 'jungle', 'mid', 'bottom', 'support']
+    pools = {k: [] for k in role_keys}
+    async def _fetch():
+        stats_per_role = await asyncio.gather(
+            *[data_manager.fetch_champion_stats(_current_patch, r) for r in all_roles]
+        )
+        for key, stats in zip(role_keys, stats_per_role):
+            pools[key] = [s.champion_id for s in stats]
+    asyncio.run(_fetch())
+    return jsonify(pools)
 
 
 @app.route('/api/infer_roles', methods=['POST'])
@@ -683,8 +722,8 @@ async def _champion_detail_async(champ_id: str, role: Role, allies: list, enemie
                 'win_rate':      round(cd.win_rate_a * 100, 1),
                 'advantage':     'high' if cd.win_rate_a > 0.55 else 'mid',
             })
-    # Fallback: if no enemy overlap, show top all-time matchups unfiltered
-    if not counters and not strong_against:
+    # Fallback: only show general matchups when no enemies are known yet (empty draft)
+    if not enemy_set and not counters and not strong_against:
         for cd in counter_data:
             if cd.champion_a != champ_id:
                 continue
@@ -724,12 +763,13 @@ async def _champion_detail_async(champ_id: str, role: Role, allies: list, enemie
             avg(5),          # Late
             avg(6, 7),       # Full
         ]
-        # Enemy curve: flat at 50% (avg game win rate baseline) when enemy unknown
+        # Reference line: champion's own weighted-average win rate (flat — shows whether each
+        # stage is above or below the champion's overall norm). Keeps the same scale as ally_curve.
         baseline = round(sum(e['wr'] * e['n'] for e in raw_gl) / max(sum(e['n'] for e in raw_gl), 1), 1)
-        enemy_curve = _team_curve(enemies) if enemies else [baseline] * 5
+        enemy_curve = [baseline] * 5
     else:
         ally_curve  = _team_curve([champ_id] + allies)
-        enemy_curve = _team_curve(enemies) if enemies else [55, 65, 66, 64, 60]
+        enemy_curve = [50] * 5
 
     return {
         'build':          build,

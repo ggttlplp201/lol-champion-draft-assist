@@ -155,12 +155,6 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 
-.d2-bans-center { display: flex; align-items: center; gap: 10px; }
-.d2-phase-txt { font-size: 10px; font-weight: 700; color: var(--text); letter-spacing: 1.5px; }
-.d2-picks-track {
-  width: 80px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
-}
-.d2-picks-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; width: 0%; }
 
 /* ── Body ── */
 .d2-body {
@@ -445,52 +439,8 @@ html, body {
 }
 .d2-btn-secondary:hover { border-color: var(--text-mute); }
 
-/* ── Two-column row (why + breakdown) ── */
+/* ── Two-column row ── */
 .d2-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-/* Why panel */
-.d2-why-panel {
-  padding: 14px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-}
-.d2-panel-heading {
-  font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 1px; margin-bottom: 10px;
-}
-.d2-why-list { display: flex; flex-direction: column; gap: 8px; }
-.d2-why-item { display: flex; gap: 10px; align-items: flex-start; }
-.d2-why-badge {
-  font-size: 9px; font-weight: 700; padding: 3px 6px; border-radius: 3px;
-  letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0;
-  min-width: 62px; text-align: center;
-}
-.badge-counter { color: var(--green);  background: rgba(62,214,148,0.1); }
-.badge-synergy  { color: var(--ally);   background: rgba(78,163,255,0.1); }
-.badge-meta     { color: var(--accent); background: rgba(155,124,245,0.1); }
-.badge-comp     { color: var(--gold);   background: rgba(245,184,64,0.1); }
-
-.d2-why-body { flex: 1; min-width: 0; }
-.d2-why-main { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.3; }
-.d2-why-sub  { font-size: 11px; color: var(--text-mute); margin-top: 1px; line-height: 1.3; }
-
-/* Breakdown panel */
-.d2-breakdown-panel {
-  padding: 14px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-}
-.d2-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
-.d2-bar-row:last-child { margin-bottom: 0; }
-.d2-bar-lbl { font-size: 10px; font-weight: 600; color: var(--text-mute); width: 54px; flex-shrink: 0; }
-.d2-bar-track {
-  flex: 1; height: 6px; background: var(--border2); border-radius: 3px; overflow: hidden;
-}
-.d2-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
-.bar-meta     { background: var(--accent); }
-.bar-synergy  { background: var(--ally); }
-.bar-counter  { background: var(--green); }
-.d2-bar-num {
-  font-size: 11px; font-weight: 600; color: var(--text-dim);
-  font-family: 'JetBrains Mono'; width: 26px; text-align: right; flex-shrink: 0;
-}
 
 /* ── Alternatives ── */
 .d2-alts-panel {

@@ -28,6 +28,7 @@ class DraftAdvisor {
             enemyBans: [null, null, null, null, null],
         };
         this.pool        = [];
+        this.rolePools   = null;
         this.filter      = 'best';
         this.currentSlot = null;
         this.lastRecs    = null;
@@ -37,7 +38,7 @@ class DraftAdvisor {
     }
 
     async init() {
-        await Promise.all([this.loadDDragonVersion(), this.loadChampions()]);
+        await Promise.all([this.loadDDragonVersion(), this.loadChampions(), this.loadRolePools()]);
         this.buildLayout();
         this.bindEvents();
         this.updateHeaderRole();
@@ -65,6 +66,12 @@ class DraftAdvisor {
         } catch (e) { console.error(e); }
     }
 
+    async loadRolePools() {
+        try {
+            this.rolePools = await (await fetch('/api/role_pools')).json();
+        } catch (e) { console.error(e); }
+    }
+
     // ── DDragon helpers ───────────────────────────────────────
 
     getDDragonId(champId) {
@@ -83,16 +90,6 @@ class DraftAdvisor {
 
     champImg(champId) {
         return `https://ddragon.leagueoflegends.com/cdn/${this.ddVersion}/img/champion/${this.getDDragonId(champId)}.png`;
-    }
-
-    itemImg(itemId) {
-        return `https://ddragon.leagueoflegends.com/cdn/${this.ddVersion}/img/item/${itemId}.png`;
-    }
-
-    runeImg(runeId) {
-        // DDragon doesn't host rune images by ID directly, but via path e.g. perk-images/...
-        // Use CommunityDragon as fallback
-        return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perk-images/styles/${runeId}.png`;
     }
 
     // ── Portrait rendering ────────────────────────────────────
@@ -233,10 +230,11 @@ class DraftAdvisor {
             if (this.lastRecs) this.renderCenter(this.lastRecs);
         });
 
+        document.getElementById('shuffle-btn')?.addEventListener('click', () => this.shuffleDraft());
+
         document.getElementById('ally-roster').addEventListener('click', e => {
             const row = e.target.closest('.d2-rrow');
             if (!row || e.target.closest('button')) return;
-            if (row.dataset.role === this.role) return;  // user's own slot — not manually pickable
             if (!this.draft.allies[row.dataset.role]) this.openPicker({ side: 'ally', role: row.dataset.role });
         });
         document.getElementById('enemy-roster').addEventListener('click', e => {
@@ -265,12 +263,88 @@ class DraftAdvisor {
             if (!row || !this.lastRecs) return;
             const list = this.getRecList(this.lastRecs);
             const idx  = parseInt(row.dataset.idx);
-            if (list && list[idx]) this.showDetailFor(list[idx], idx);
+            if (list && list[idx]) this.showDetailFor(list[idx], idx, false);
         });
 
         document.getElementById('pool-input').addEventListener('keydown', e => {
             if (e.key === 'Enter') { this.addToPool(e.target.value.trim()); e.target.value = ''; }
         });
+    }
+
+    shuffleDraft() {
+        const byRole = this.rolePools || { top: [], jungle: [], mid: [], bottom: [], support: [] };
+
+        const pick = (pool, used) => {
+            const avail = pool.filter(id => !used.has(id));
+            if (!avail.length) return null;
+            const id = avail[Math.floor(Math.random() * avail.length)];
+            used.add(id);
+            return id;
+        };
+
+        const used = new Set();
+        const roles = ['top', 'jungle', 'mid', 'bottom', 'support'];
+        const allyPicks   = roles.map(r => pick(byRole[r], used));
+        const enemyPicks  = roles.map(r => pick(byRole[r], used));
+
+        // Bans: any remaining champion
+        const allIds = Object.keys(this.champions);
+        const banPick = () => {
+            const avail = allIds.filter(id => !used.has(id));
+            const id = avail[Math.floor(Math.random() * avail.length)];
+            used.add(id);
+            return id;
+        };
+        const allyBans  = Array.from({ length: 5 }, banPick);
+        const enemyBans = Array.from({ length: 5 }, banPick);
+
+        this.draft = {
+            allies:    Object.fromEntries(roles.map((r, i) => [r, allyPicks[i]])),
+            enemies:   Object.fromEntries(roles.map((r, i) => [r, enemyPicks[i]])),
+            allyBans,
+            enemyBans,
+        };
+
+        this.buildBanRow('ally-bans', 'ally');
+        this.buildBanRow('enemy-bans', 'enemy');
+        for (let i = 0; i < 5; i++) {
+            this.updateBanSlot('ally', i, allyBans[i]);
+            this.updateBanSlot('enemy', i, enemyBans[i]);
+        }
+        document.querySelectorAll('#ally-roster .d2-rrow').forEach(row =>
+            this.refreshRosterRow(row, 'ally', row.dataset.role, this.draft.allies[row.dataset.role])
+        );
+        document.querySelectorAll('#enemy-roster .d2-rrow').forEach(row =>
+            this.refreshRosterRow(row, 'enemy', row.dataset.role, this.draft.enemies[row.dataset.role])
+        );
+        this.updatePicksProgress();
+        this.fetchRecs();
+    }
+
+    resetDraft() {
+        this.draft = {
+            allies:    { top: null, jungle: null, mid: null, bottom: null, support: null },
+            enemies:   { top: null, jungle: null, mid: null, bottom: null, support: null },
+            allyBans:  [null, null, null, null, null],
+            enemyBans: [null, null, null, null, null],
+        };
+        this._roleOverridden = false;
+        this._inferGen = 0;
+        this.lastRecs = null;
+        this.buildBanRow('ally-bans', 'ally');
+        this.buildBanRow('enemy-bans', 'enemy');
+        document.querySelectorAll('#ally-roster .d2-rrow').forEach(row =>
+            this.refreshRosterRow(row, 'ally', row.dataset.role, null)
+        );
+        document.querySelectorAll('#enemy-roster .d2-rrow').forEach(row =>
+            this.refreshRosterRow(row, 'enemy', row.dataset.role, null)
+        );
+        this.updatePicksProgress();
+        clearInterval(this._timerInterval);
+        this.timerSecs = 0;
+        this._timerStarted = false;
+        document.getElementById('live-timer').textContent = '0:00';
+        this.fetchRecs();
     }
 
     setRole(role) {
@@ -431,61 +505,93 @@ class DraftAdvisor {
 
     applyLCUState(state) {
         if (!state || !state.active) {
+            if (this._wasActive) {
+                if (this._gameStarted) {
+                    // Game launched — already minimized; just clear the flag
+                    this._gameStarted = false;
+                } else {
+                    // Champ select ended early (dodge) — reset everything
+                    this.resetDraft();
+                }
+            }
+            this._wasActive = false;
             this._setLCUIndicator(false);
             return;
         }
+
+        // New champ select session starting
+        if (!this._wasActive) {
+            this._gameStarted = false;
+        }
+        this._wasActive = true;
         this._setLCUIndicator(true);
+
+        // Detect game launch phase → minimize window
+        if (state.phase === 'GAME_STARTING' && !this._gameStarted) {
+            this._gameStarted = true;
+            window.draftAdvisor?.minimize();
+        }
 
         let changed = false;
 
         // Auto-set role from LCU if the user hasn't manually changed it
         if (state.my_role && state.my_role !== this.role && !this._roleOverridden) {
             this.setRole(state.my_role);
-            // Don't return — continue applying picks/bans from this same state message
         }
 
-        // Apply ally picks (including the user's own slot so their pick shows)
+        // Apply ally picks
         for (const [role, champId] of Object.entries(state.allies || {})) {
             const current = this.draft.allies[role];
             if (champId && current !== champId) {
                 this.draft.allies[role] = champId;
                 const row = document.querySelector(`#ally-roster .d2-rrow[data-role="${role}"]`);
                 if (row) this.refreshRosterRow(row, 'ally', role, champId);
-                this.updateLockCount('ally');
                 changed = true;
             } else if (!champId && current) {
                 this.draft.allies[role] = null;
                 const row = document.querySelector(`#ally-roster .d2-rrow[data-role="${role}"]`);
                 if (row) this.refreshRosterRow(row, 'ally', role, null);
-                this.updateLockCount('ally');
                 changed = true;
             }
         }
+        if (changed) this.updatePicksProgress();
 
-        // Apply enemy picks
-        const applyEnemies = (enemies) => {
-            for (const [role, champId] of Object.entries(enemies || {})) {
+        // Apply enemy picks — always clear stale slots first so no champion lingers
+        // in an old role after being re-keyed or removed
+        const applyEnemies = (incoming) => {
+            for (const role of ROLES) {
+                if (this.draft.enemies[role] && !(role in (incoming || {}))) {
+                    this.draft.enemies[role] = null;
+                    const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
+                    if (row) this.refreshRosterRow(row, 'enemy', role, null);
+                    changed = true;
+                }
+            }
+            for (const [role, champId] of Object.entries(incoming || {})) {
                 const current = this.draft.enemies[role];
                 if (champId && current !== champId) {
                     this.draft.enemies[role] = champId;
                     const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
                     if (row) this.refreshRosterRow(row, 'enemy', role, champId);
-                    this.updateLockCount('enemy');
                     changed = true;
                 } else if (!champId && current) {
                     this.draft.enemies[role] = null;
                     const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
                     if (row) this.refreshRosterRow(row, 'enemy', role, null);
-                    this.updateLockCount('enemy');
                     changed = true;
                 }
             }
+            this.updatePicksProgress();
         };
 
-        const enemyChamps = Object.values(state.enemies || {}).filter(Boolean);
+        // Use the flat champion list from the backend (avoids role-collision drops)
+        const enemyChamps = state.enemy_champ_list && state.enemy_champ_list.length > 0
+            ? state.enemy_champ_list
+            : Object.values(state.enemies || {}).filter(Boolean);
+
         if (!state.enemy_roles_real && enemyChamps.length > 0) {
-            // Enemy positions unknown — infer from Lolalytics primary lane data.
-            // Generation counter prevents stale responses from overwriting newer ones.
+            // Roles unknown — infer from Lolalytics primary lane data.
+            // Generation counter discards stale responses.
             this._inferGen = (this._inferGen || 0) + 1;
             const myGen = this._inferGen;
             fetch('/api/infer_roles', {
@@ -495,23 +601,11 @@ class DraftAdvisor {
             })
             .then(r => r.json())
             .then(inferred => {
-                if (myGen !== this._inferGen) return; // superseded by a newer call
-                // Rebuild enemies dict with inferred roles
+                if (myGen !== this._inferGen) return;
                 const reKeyed = {};
-                for (const [role, champId] of Object.entries(state.enemies || {})) {
-                    if (!champId) continue;
-                    const betterRole = inferred[champId] || role;
-                    reKeyed[betterRole] = champId;
-                }
-                // Clear any slots that are no longer in the new assignment
-                for (const role of ROLES) {
-                    if (this.draft.enemies[role] && !reKeyed[role]) {
-                        this.draft.enemies[role] = null;
-                        const row = document.querySelector(`#enemy-roster .d2-rrow[data-role="${role}"]`);
-                        if (row) this.refreshRosterRow(row, 'enemy', role, null);
-                        this.updateLockCount('enemy');
-                        changed = true;
-                    }
+                for (const champId of enemyChamps) {
+                    const role = inferred[champId];
+                    if (role) reKeyed[role] = champId;
                 }
                 applyEnemies(reKeyed);
                 if (changed) this.fetchRecs();
@@ -524,7 +618,7 @@ class DraftAdvisor {
             applyEnemies(state.enemies);
         }
 
-        // Apply bans — update both the draft state arrays and the DOM
+        // Apply bans
         const applyBans = (incoming, side) => {
             const arr = side === 'ally' ? this.draft.allyBans : this.draft.enemyBans;
             const el  = document.getElementById(`${side}-bans`);
@@ -552,7 +646,6 @@ class DraftAdvisor {
         applyBans(state.ally_bans  || [], 'ally');
         applyBans(state.enemy_bans || [], 'enemy');
 
-        // If infer_roles is in flight it will call fetchRecs itself; otherwise call here
         const inferInFlight = !state.enemy_roles_real && enemyChamps.length > 0;
         if (changed && !inferInFlight) this.fetchRecs();
     }
@@ -586,12 +679,15 @@ class DraftAdvisor {
 
         this.showState('loading');
         try {
+            const declared = this.draft.allies[this.role] || null;
             const body = {
-                role:          this.role,
-                allies:        Object.values(this.draft.allies).filter(Boolean),
-                enemies:       Object.values(this.draft.enemies).filter(Boolean),
-                banned:        [...this.draft.allyBans, ...this.draft.enemyBans].filter(Boolean),
-                championPool:  this.pool,
+                role:         this.role,
+                // Exclude the declared champion from allies so the backend can score it
+                allies:       Object.values(this.draft.allies).filter(c => c && c !== declared),
+                enemies:      Object.values(this.draft.enemies).filter(Boolean),
+                banned:       [...this.draft.allyBans, ...this.draft.enemyBans].filter(Boolean),
+                championPool: this.pool,
+                declared,
             };
             const data = await (await fetch('/api/recommendations', {
                 method: 'POST',
@@ -603,7 +699,7 @@ class DraftAdvisor {
             this.lastRecs = data;
             this.renderCenter(data);
         } catch (e) {
-            if (e.name === 'AbortError') return;  // superseded by a newer request
+            if (e.name === 'AbortError') return;
             this.showState('empty');
             console.error(e);
         }
@@ -616,16 +712,23 @@ class DraftAdvisor {
     }
 
     renderCenter(data) {
-        const list = this.getRecList(data);
-        if (!list || list.length === 0) { this.showState('empty'); return; }
+        const declared = data.declaredChampion;
+        const list     = this.getRecList(data);
+
+        if (!declared && (!list || list.length === 0)) { this.showState('empty'); return; }
         this.showState('content');
-        this.showDetailFor(list[0], 0);
+
+        if (declared) {
+            // Player has declared a champion — show their pick at the top
+            this.showDetailFor(declared, -1, true);
+        } else {
+            this.showDetailFor(list[0], 0, false);
+        }
     }
 
-    showDetailFor(rec, activeIdx) {
-        this.renderHeroCard(rec);
+    showDetailFor(rec, activeIdx, isYourPick = false) {
+        this.renderHeroCard(rec, isYourPick);
 
-        // Fetch detail from backend (power spike + matchup tables + build/runes)
         const allies  = Object.values(this.draft.allies).filter(Boolean);
         const enemies = Object.values(this.draft.enemies).filter(Boolean);
         fetch('/api/champion_detail', {
@@ -648,7 +751,13 @@ class DraftAdvisor {
         });
 
         const list = this.lastRecs ? this.getRecList(this.lastRecs) : null;
-        if (list && list.length > 1) this.renderAlternatives(list, activeIdx);
+        // In "your pick" mode the declared champion is already shown — show all recs as alternatives.
+        // In normal mode skip the first item since it's displayed as the hero card.
+        if (isYourPick) {
+            if (list && list.length > 0) this.renderAlternatives(list, activeIdx, true);
+        } else {
+            if (list && list.length > 1) this.renderAlternatives(list, activeIdx, false);
+        }
     }
 
     showState(s) {
@@ -683,7 +792,6 @@ class DraftAdvisor {
         const sb = rec.scoreBreakdown;
         const p  = [];
         if (sb.counterScore > 65) p.push('strong counter');
-        if (sb.synergyScore > 65) p.push('great synergy');
         if (sb.metaScore > 65)    p.push('meta pick');
         if (rec.winRate > 53)     p.push(`${rec.winRate}% WR`);
         return p.length ? p.join(' · ') : `${rec.pickRate}% pick rate`;
@@ -691,31 +799,37 @@ class DraftAdvisor {
 
     // ── Hero card ─────────────────────────────────────────────
 
-    renderHeroCard(rec) {
+    renderHeroCard(rec, isYourPick = false) {
         const el   = document.getElementById('hero-card');
         const tier = this.getTier(rec.score);
         const sb   = rec.scoreBreakdown;
         const lolUrl = `https://lolalytics.com/lol/${rec.championId}/build/`;
+        const eyebrow = isYourPick ? '🎯 YOUR PICK' : '★ TOP RECOMMENDATION';
+        const borderStyle = isYourPick
+            ? 'border:1px solid rgba(62,214,148,0.4);border-left:3px solid var(--green)'
+            : 'border:1px solid rgba(155,124,245,0.33);border-left:3px solid var(--accent)';
 
+        const hasData = rec.score > 0 || rec.winRate > 0;
         el.className = 'd2-hero-card';
+        el.style.cssText = borderStyle;
         el.innerHTML = `
             <div class="d2-hero-portrait-wrap">
                 <div class="d2-hero-portrait-img" style="background:${this.portraitBg(rec.championId)}">
                     <img src="${this.champImg(rec.championId)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1" onerror="this.style.display='none'" alt="">
                     <span class="d2-portrait-init" style="font-size:28px">${rec.championName.slice(0,2)}</span>
                 </div>
-                <div class="d2-tier-badge tier-${tier.cls}">${tier.label} TIER</div>
+                ${hasData ? `<div class="d2-tier-badge tier-${tier.cls}">${tier.label} TIER</div>` : ''}
             </div>
             <div class="d2-hero-info">
-                <div class="d2-hero-eyebrow">★ TOP RECOMMENDATION</div>
+                <div class="d2-hero-eyebrow" style="color:${isYourPick ? 'var(--green)' : 'var(--accent)'}">${eyebrow}</div>
                 <div class="d2-hero-name">${rec.championName}</div>
-                <div class="d2-hero-blurb">${this.blurb(rec)}</div>
-                <div class="d2-hero-stats">
+                <div class="d2-hero-blurb">${hasData ? this.blurb(rec) : 'No ranked data for this role'}</div>
+                ${hasData ? `<div class="d2-hero-stats">
                     <div><div class="d2-hstat-label">SCORE</div>   <div class="d2-hstat-val" style="color:var(--gold)">${rec.score}</div></div>
                     <div><div class="d2-hstat-label">WIN</div>     <div class="d2-hstat-val" style="color:var(--green)">${rec.winRate}%</div></div>
-                    <div><div class="d2-hstat-label">SYNERGY</div> <div class="d2-hstat-val" style="color:var(--ally)">${Math.round(sb.synergyScore)}</div></div>
+                    <div><div class="d2-hstat-label">PICK</div>    <div class="d2-hstat-val" style="color:var(--ally)">${rec.pickRate}%</div></div>
                     <div><div class="d2-hstat-label">COUNTER</div> <div class="d2-hstat-val" style="color:var(--green)">${Math.round(sb.counterScore)}</div></div>
-                </div>
+                </div>` : ''}
             </div>
             <div class="d2-hero-actions">
                 <a class="d2-btn-primary" href="${lolUrl}" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">Lolalytics ↗</a>
@@ -743,17 +857,17 @@ class DraftAdvisor {
         const stageLabels = ['FORCE EARLY FIGHTS', 'FIGHT AT LVL 6', 'FIGHT IN MID GAME', 'PLAY FOR LATE GAME', 'SCALE TO FULL BUILD'];
         const calloutLabel = stageLabels[peak];
 
-        // Auto-scale Y-axis to the actual win rate range
+        // Fixed Y-axis anchor so all champions share the same visual scale.
+        // Always cover at least 44–60%; expand only if the data goes outside that range.
         const all = [...ally, ...enemy];
-        const rawMin = Math.min(...all), rawMax = Math.max(...all);
-        const pad = Math.max(1.5, (rawMax - rawMin) * 0.2);
-        const minV = rawMin - pad, maxV = rawMax + pad;
+        const minV = Math.min(Math.min(...all) - 1.5, 44);
+        const maxV = Math.max(Math.max(...all) + 1.5, 60);
         const range = maxV - minV;
 
-        // SVG dimensions
-        const W = 680, H = 150, PX = 44, PY = 24;
+        // SVG dimensions — PYT = top padding, PYB = bottom padding (room for 2 label rows)
+        const W = 680, H = 140, PX = 44, PYT = 32, PYB = 26;
         const x = t => PX + t * (W - PX - 18) / 4;
-        const y = v => H - PY - ((v - minV) / range) * (H - PY * 2);
+        const y = v => H - PYB - ((v - minV) / range) * (H - PYT - PYB);
 
         const bezier = (arr) => {
             const pts = arr.map((v, i) => [x(i), y(v)]);
@@ -769,14 +883,14 @@ class DraftAdvisor {
 
         const area = (arr) => {
             const pts = arr.map((v, i) => [x(i), y(v)]);
-            let d = `M ${pts[0][0]} ${H - PY}`;
+            let d = `M ${pts[0][0]} ${H - PYB}`;
             pts.forEach(([px, py], i) => {
                 if (i === 0) { d += ` L ${px} ${py}`; return; }
                 const [ppx, ppy] = pts[i - 1];
                 const mx = ppx + (px - ppx) / 2;
                 d += ` C ${mx} ${ppy}, ${mx} ${py}, ${px} ${py}`;
             });
-            d += ` L ${pts[pts.length - 1][0]} ${H - PY} Z`;
+            d += ` L ${pts[pts.length - 1][0]} ${H - PYB} Z`;
             return d;
         };
 
@@ -803,7 +917,7 @@ class DraftAdvisor {
                         <div style="width:14px;height:2px;background:var(--ally);border-radius:1px"></div>Your pick
                     </div>
                     <div class="d2-spike-legend-item">
-                        <div style="width:14px;height:2px;border-top:2px dashed var(--enemy)"></div>Baseline
+                        <div style="width:14px;height:2px;border-top:2px dashed var(--enemy)"></div>Avg WR
                     </div>
                 </div>
             </div>
@@ -822,8 +936,8 @@ class DraftAdvisor {
                     `<line x1="${PX}" x2="${W-18}" y1="${y(g)}" y2="${y(g)}" stroke="#262b3a" stroke-dasharray="2 4" opacity="0.6"/>
                      <text x="${PX-4}" y="${y(g)+3.5}" text-anchor="end" font-size="8.5" fill="#4a5168" font-family="JetBrains Mono">${g}%</text>`
                 ).join('')}
-                <rect x="${px-52}" y="${PY-4}" width="104" height="${H-PY*2+4}" fill="url(#winGrad)" rx="6"/>
-                <line x1="${px}" x2="${px}" y1="${PY}" y2="${H-PY}" stroke="#3ed694" stroke-dasharray="3 3" opacity="0.5"/>
+                <rect x="${px-52}" y="${PYT-4}" width="104" height="${H-PYT-PYB+4}" fill="url(#winGrad)" rx="6"/>
+                <line x1="${px}" x2="${px}" y1="${PYT}" y2="${H-PYB}" stroke="#3ed694" stroke-dasharray="3 3" opacity="0.5"/>
                 <path d="${area(ally)}" fill="url(#allyFill)"/>
                 <path d="${bezier(enemy)}" stroke="#ff5b78" stroke-width="1.5" fill="none" stroke-dasharray="4 3" opacity="0.7"/>
                 <path d="${bezier(ally)}"  stroke="#4ea3ff" stroke-width="2.5" fill="none"/>
@@ -834,14 +948,14 @@ class DraftAdvisor {
                 <rect x="${px-58}" y="4" width="116" height="18" rx="9" fill="#3ed69428"/>
                 <text x="${px}" y="17" text-anchor="middle" font-size="10" font-weight="700" fill="#3ed694" font-family="Space Grotesk" letter-spacing="0.5">⚔ WIN WINDOW</text>
                 ${stages.map((s, i) => `
-                    <text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" font-weight="600" fill="#9ba3b8" font-family="Space Grotesk">${s}</text>
-                    <text x="${x(i)}" y="${H+1}" text-anchor="middle" font-size="8.5" fill="#4a5168" font-family="JetBrains Mono">${lvls[i]}</text>
+                    <text x="${x(i)}" y="${H - PYB + 13}" text-anchor="middle" font-size="10" font-weight="600" fill="#9ba3b8" font-family="Space Grotesk">${s}</text>
+                    <text x="${x(i)}" y="${H - PYB + 23}" text-anchor="middle" font-size="8.5" fill="#4a5168" font-family="JetBrains Mono">${lvls[i]}</text>
                 `).join('')}
             </svg>
             <div class="d2-spike-callout">
                 <span class="d2-spike-callout-title">${calloutLabel}</span>
                 <div style="width:1px;height:12px;background:rgba(62,214,148,0.3);flex-shrink:0"></div>
-                <span class="d2-spike-callout-body">Peak win rate ${ally[peak]}% at this stage${peakAdv > 0 ? ` (+${peakAdv}% vs baseline)` : ''}.</span>
+                <span class="d2-spike-callout-body">Peak win rate ${ally[peak]}% at this stage${peakAdv > 0 ? ` (+${peakAdv}% vs avg)` : ''}.</span>
             </div>
         </div>`;
     }
@@ -935,15 +1049,6 @@ class DraftAdvisor {
         </div>`;
     }
 
-    barHtml(label, val, cls) {
-        const v = Math.min(100, Math.max(0, Math.round(val)));
-        return `<div class="d2-bar-row">
-            <span class="d2-bar-lbl">${label}</span>
-            <div class="d2-bar-track"><div class="d2-bar-fill bar-${cls}" style="width:${v}%"></div></div>
-            <span class="d2-bar-num">${v}</span>
-        </div>`;
-    }
-
     // ── Build & Runes ─────────────────────────────────────────
 
     renderBuildRunes(rec, build, runes) {
@@ -1012,16 +1117,17 @@ class DraftAdvisor {
 
     // ── Alternatives ──────────────────────────────────────────
 
-    renderAlternatives(list, activeIdx) {
+    renderAlternatives(list, activeIdx, fromStart = false) {
         const el  = document.getElementById('alts-panel');
-        const alt = list.slice(1, 9);
-        if (!alt.length) { el.innerHTML = ''; return; }
+        // Always start from index 0 so the user can click back to the top rec at any time.
+        // fromStart=true (your-pick mode): 8 items; normal mode: 9 items (includes #1).
+        const items = fromStart ? list.slice(0, 8) : list.slice(0, 9);
+        if (!items.length) { el.innerHTML = ''; return; }
 
-        const rows = alt.map((rec, i) => {
-            const idx  = i + 1;
+        const rows = items.map((rec, i) => {
             const tier = this.getTier(rec.score);
-            const sel  = activeIdx === idx ? ' selected' : '';
-            return `<div class="d2-alt-row${sel}" data-idx="${idx}">
+            const sel  = activeIdx === i ? ' selected' : '';
+            return `<div class="d2-alt-row${sel}" data-idx="${i}">
                 ${this.portrait(rec.championId, 32)}
                 <div style="min-width:0">
                     <div class="d2-alt-name">${rec.championName}</div>
@@ -1033,10 +1139,13 @@ class DraftAdvisor {
             </div>`;
         }).join('');
 
+        const title = fromStart ? 'TOP PICKS' : 'ALTERNATIVES';
+        const sub   = fromStart ? `${items.length} recommended picks` : `${items.length} picks`;
+
         el.innerHTML = `<div class="d2-alts-panel">
             <div class="d2-alts-head">
-                <span class="d2-alts-title">ALTERNATIVES</span>
-                <span class="d2-alts-sub">${alt.length} more strong picks</span>
+                <span class="d2-alts-title">${title}</span>
+                <span class="d2-alts-sub">${sub}</span>
             </div>
             <div class="d2-alts-grid">${rows}</div>
         </div>`;

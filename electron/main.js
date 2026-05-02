@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -84,12 +84,13 @@ function createWindow() {
     minWidth: 860,
     minHeight: 600,
     title: 'Draft Advisor',
-    alwaysOnTop: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(__dirname, 'preload.js') },
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}/`);
   mainWindow.on('closed', () => { mainWindow = null; });
+
+  ipcMain.on('window-minimize', () => { mainWindow?.minimize(); });
 
   // Float above fullscreen windows (works over League windowed/borderless)
   mainWindow.setAlwaysOnTop(true, 'floating');

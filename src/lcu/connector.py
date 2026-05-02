@@ -163,13 +163,18 @@ class LCUConnector:
                     champ = self._cid(p.get('championPickIntent', 0))
                 allies[role] = champ
 
-        # Enemy picks — keyed by role
+        # Enemy picks — keyed by role + flat list (for infer_roles)
         enemies: dict = {}
+        enemy_champ_list: list = []
         for p in their_team:
+            champ = self._cid(p.get('championId', 0))
+            if champ:
+                enemy_champ_list.append(champ)
             role = self._role_for(p)
             if role:
-                champ = self._cid(p.get('championId', 0))
-                enemies[role] = champ
+                # Prefer a picked champion; don't overwrite a real pick with None
+                if role not in enemies or (champ and not enemies.get(role)):
+                    enemies[role] = champ
 
         # Bans: prefer bans.myTeamBans/theirTeamBans; fall back to completed ban actions
         bans_raw   = data.get('bans', {})
@@ -195,8 +200,9 @@ class LCUConnector:
         log.debug('parsed: my_role=%s allies=%s enemies=%s ally_bans=%s enemy_bans=%s',
                   my_role, list(allies.keys()), list(enemies.keys()), ally_bans, enemy_bans)
 
-        # Flag whether enemy positions are real (from LCU) or inferred (cellId fallback)
-        enemy_roles_real = any(
+        # Positions are "real" only when ALL enemies have an assignedPosition
+        # — if any are missing we fall back to infer_roles for the whole team
+        enemy_roles_real = bool(their_team) and all(
             p.get('assignedPosition', '') for p in their_team
         )
 
@@ -206,6 +212,7 @@ class LCUConnector:
             'my_role':          my_role,
             'allies':           allies,
             'enemies':          enemies,
+            'enemy_champ_list': enemy_champ_list,
             'ally_bans':        ally_bans,
             'enemy_bans':       enemy_bans,
             'enemy_roles_real': enemy_roles_real,
