@@ -91,10 +91,6 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 
   ipcMain.on('window-minimize', () => { mainWindow?.minimize(); });
-
-  // Float above fullscreen windows (works over League windowed/borderless)
-  mainWindow.setAlwaysOnTop(true, 'floating');
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 }
 
 function createTray() {
@@ -103,10 +99,6 @@ function createTray() {
   tray.setToolTip('Draft Advisor');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show', click: () => { mainWindow ? mainWindow.show() : createWindow(); } },
-    {
-      label: 'Always on Top', type: 'checkbox', checked: true,
-      click: (item) => mainWindow?.setAlwaysOnTop(item.checked, 'floating'),
-    },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));

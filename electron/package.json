@@ -1,6 +1,6 @@
 {
   "name": "draft-advisor",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "League of Legends Draft Advisor overlay",
   "main": "main.js",
   "scripts": {
